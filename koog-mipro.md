@@ -36,7 +36,7 @@ Support automatic prompt optimization (MIPRO v2) within Koog's agent framework. 
 | `Signature.instruction` | `OptimizableNode.instruction: String` |
 | `Trace` | `Demonstration<TInput, TOutput>` |
 | `Example` | `Example(data: Map<String, Any>, labelKey)` |
-| `Optimizer` | `StrategyOptimizer` interface |
+| `Optimizer` | Standalone classes (`LabeledFewShot`, `BootstrapFewShot`) returning `OptimizationResult` |
 
 ### OptimizableNode
 
@@ -165,20 +165,12 @@ val nodeTraces = traces?.getTracesForNode("classify")
 
 The feature checks `node is OptimizableNode<*, *>` to determine which nodes to trace.
 
-### Strategy Optimizer Interface
+### Optimizers
 
-```kotlin
-public interface StrategyOptimizer {
-    suspend fun <TInput, TOutput> optimize(
-        strategy: AIAgentGraphStrategy<TInput, TOutput>,
-        trainset: Dataset,
-        valset: Dataset? = null,
-        metric: Metric<TOutput>,
-    ): OptimizationResult
-}
-```
+There is no shared optimizer interface — each optimizer has its own `optimize()` signature tailored to its needs. The common output is `OptimizationResult(config, score, iterations, metadata)`. The `config` can be used directly via coroutine context, baked into an agent via `result.toAgent(agent)`, or eventually baked into node defaults.
 
-Returns `OptimizationResult(config, score, iterations, metadata)`. The `config` can be used directly via coroutine context, or eventually baked into node defaults.
+- **`LabeledFewShot`**: Takes only a strategy + trainset. Maps labeled examples directly to per-node demonstrations.
+- **`BootstrapFewShot`**: Takes agent components (executor, config, strategy, toolRegistry). Builds a fresh teacher agent per training example with trace collection, runs it, and keeps traces from successful executions.
 
 ### Example and Metric Types
 
@@ -232,6 +224,70 @@ Three-step optimization pipeline:
 - Evaluate candidates on validation set
 - Return best configuration
 
+## BootstrapFewShot Algorithm (Detailed)
+
+BootstrapFewShot generates demonstrations by running a "teacher" agent on training data and keeping traces from successful executions. It is Step 1 of the MIPRO v2 pipeline (above), and also a standalone optimizer.
+
+### Design
+
+The optimizer takes agent components (`promptExecutor`, `agentConfig`, `strategy`, `toolRegistry`) rather than a pre-built agent. For each training example, it constructs a fresh teacher agent with `TraceCollectionFeature` installed. This means:
+- The caller doesn't need to install tracing — it's an implementation detail
+- Each example gets isolated trace storage — no shared mutable state
+- Safe for future parallelization
+
+The `optimize()` method returns an `OptimizationResult`. To use it:
+- **Coroutine context**: `withContext(result.config) { agent.run(input) }`
+- **Optimized agent copy**: `val optimizedAgent = result.toAgent(originalAgent)` — creates a new `GraphAIAgent` that injects the config automatically on every `run()` call
+
+### Algorithm Flow
+
+1. **Teacher pre-optimization**: If `maxLabeledDemos > 0`, run `LabeledFewShot(k=maxLabeledDemos)` on the strategy first. This gives the teacher a baseline of good demonstrations.
+
+2. **Bootstrap loop**: For each training example (until `maxBootstrappedDemos` traces collected):
+   - **Build teacher**: Construct a fresh `GraphAIAgent` with `TraceCollectionFeature` for this example.
+   - **Filter teacher demos**: Remove any teacher demonstrations that would leak the current example's ground truth (prevent data leakage).
+   - **Run teacher**: Execute the teacher agent on the example, collecting per-node traces.
+   - **Evaluate**: Run `metric(expected, actual)` against `metricThreshold`. If no metric is provided, all completions are accepted.
+   - **On success**: Store per-node traces. Move to next example.
+   - **On metric failure**: Retry up to `maxRounds` times. If all rounds fail, add example to fallback pool.
+   - **On exception**: Increment error counter. If `maxErrors` exceeded, stop bootstrapping entirely.
+
+3. **Train student**: For each optimizable node:
+   - Take up to `maxBootstrappedDemos` bootstrapped traces (prioritized).
+   - Fill remaining slots with labeled examples from the fallback pool (examples that failed to bootstrap), up to `maxLabeledDemos` total.
+   - Combine into demonstrations for the node.
+
+### Trace Selection
+
+When a single example produces **multiple traces** for one node (e.g., from multiple rounds or retry paths):
+- 50% chance: sample uniformly from the first N-1 traces (exploration)
+- 50% chance: take the last trace (exploitation — most recent/refined)
+- Deterministic per-trace via seeded random.
+
+### Outcome Types
+
+Each bootstrap attempt produces one of:
+- **Success**: Metric passed → per-node traces stored. `Map<nodeName, Trace>`
+- **MetricNotPassed**: Expected failure → retry next round, benign.
+- **ExceptionRaised**: Runtime error → increments error counter, treated as hard failure.
+
+### Key Parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `maxBootstrappedDemos` | 4 | Max bootstrapped traces to collect per node |
+| `maxLabeledDemos` | 16 | Max total demo slots (bootstrapped fill first, labeled fill remainder) |
+| `maxRounds` | 1 | Retry attempts per example |
+| `maxErrors` | null | Cap on exception count before stopping (null = unlimited) |
+| `metric` | null | Evaluation function `(expected, actual) -> Double` |
+| `metricThreshold` | 1.0 | Required metric score for a trace to be considered successful |
+
+### Reference Implementation Files
+
+- Algorithm: `koog-auto-agent-optimization/src/main/kotlin/promptOptimization/boostrap/BootstrapFewShot.kt`
+- Tests: `koog-auto-agent-optimization/src/test/kotlin/promptOptimization/BootstrapFewShotTest.kt`
+- Koog-specific variant: `koog-auto-agent-optimization/src/main/kotlin/agentOptimization/optimizationFramework/optimizerImplementations/BootstrapFewShotOptimizer.kt`
+
 ## File Structure
 
 ```
@@ -242,7 +298,7 @@ agents/agents-core/src/commonMain/kotlin/ai/koog/agents/core/
     ├── core/
     │   ├── Demonstration.kt                 # DONE: Typed input-output pair
     │   ├── OptimizationConfig.kt            # DONE: Coroutine context element for trial configs
-    │   ├── StrategyOptimizer.kt             # DONE: Optimizer interface + OptimizationResult + StrategyOptimizerConfig
+    │   ├── StrategyOptimizer.kt             # DONE: OptimizationResult data class
     │   └── Example.kt                       # DONE: Training data type (Map<String, Any>) + Metric<T>
     │
     ├── features/
@@ -253,7 +309,7 @@ agents/agents-core/src/commonMain/kotlin/ai/koog/agents/core/
     │
     ├── optimizers/
     │   ├── LabeledFewShot.kt                # DONE: Samples labeled examples as demonstrations
-    │   ├── BootstrapFewShot.kt              # TODO
+    │   ├── BootstrapFewShot.kt              # DONE: Bootstraps demos via teacher agent execution
     │   └── mipro/
     │       ├── MIPROv2Optimizer.kt           # TODO
     │       ├── DemoSetGenerator.kt           # TODO
@@ -262,10 +318,12 @@ agents/agents-core/src/commonMain/kotlin/ai/koog/agents/core/
     │
     └── util/
         ├── StrategyUtils.kt                 # DONE: findOptimizableModules(), validateOptimizationConfig(), etc.
+        ├── OptimizationResultUtils.kt       # DONE: OptimizationResult.toAgent() extension
         └── Evaluation.kt                    # TODO: Metric evaluation helpers
 
 agents/agents-core/src/jvmTest/kotlin/ai/koog/agents/core/optimization/
-└── OptimizationInfrastructureTest.kt        # DONE: Tests for infrastructure + OptimizableNode DSL
+├── OptimizationInfrastructureTest.kt        # DONE: Tests for infrastructure + OptimizableNode DSL
+└── BootstrapFewShotTest.kt                  # DONE: Tests for BootstrapFewShot optimizer
 ```
 
 No Koog core files are modified — `AIAgentNode`, `AIAgentNodeDelegate`, and `AIAgentSubgraphBuilder` are untouched.
@@ -281,26 +339,29 @@ No Koog core files are modified — `AIAgentNode`, `AIAgentNodeDelegate`, and `A
 - [x] `OptimizationConfig` coroutine context element with typed accessors
 - [x] `TraceCollectionFeature` with `collectTraces {}` DSL
 - [x] Context helpers (`getNodeInstruction`, `getNodeDemonstrations`, etc.)
-- [x] `StrategyOptimizer` interface + `OptimizationResult` + `StrategyOptimizerConfig`
+- [x] `OptimizationResult` data class
 - [x] `Example` (with `Map<String, Any>`) and `Metric<T>` types
 - [x] Strategy utilities (`findOptimizableModules`, `validateOptimizationConfig`, `describeForOptimization`)
 - [x] `LabeledFewShot` optimizer
 - [x] Infrastructure tests (`OptimizationInfrastructureTest`)
+- [x] `BootstrapFewShot` optimizer (takes components, builds per-example teacher agent)
+- [x] `OptimizationResult.toAgent()` extension for creating optimized agent copies
+- [x] `BootstrapFewShotTest` (13 tests)
 
 ### TODO
-- [ ] Port `BootstrapFewShot` optimizer
 - [ ] Port MIPRO v2 (`DemoSetGenerator`, `InstructionProposer`, `ConfigurationSearch`, `MIPROv2Optimizer`)
 - [ ] Bake-in mechanism: apply `OptimizationConfig` as node defaults for deployment without coroutine context
 - [ ] Metric evaluation helpers
 - [ ] End-to-end integration tests (with mocked LLM)
 - [ ] Port heart disease example
 
-## Bake-In Mechanism (Design Sketch)
+## Applying Optimization Results
 
-After optimization, users have two ways to use the result:
+After optimization, users have three ways to use the result:
 
-1. **Coroutine context (current):** `withContext(result.config) { agent.run(input) }` — works today.
-2. **Bake-in (future):** Create new `OptimizableNode` instances with instruction/demonstrations set as defaults, rebuilding the strategy. This eliminates the need for coroutine context wrappers in production.
+1. **Coroutine context:** `withContext(result.config) { agent.run(input) }` — explicit, scoped.
+2. **Optimized agent copy:** `val optimizedAgent = result.toAgent(originalAgent)` — creates a new `GraphAIAgent` that injects the config into coroutine context on every `run()` call. The original agent is unchanged.
+3. **Bake-in (future):** Create new `OptimizableNode` instances with instruction/demonstrations set as defaults, rebuilding the strategy. This eliminates the coroutine context overhead entirely.
 
 The bake-in approach requires either:
 - A `copy()`-like mechanism on `OptimizableNode` to produce a new node with updated defaults, or
@@ -331,6 +392,8 @@ Implementation is deferred until the optimizer pipeline is more complete.
 3. **Multi-model support:** Should different nodes support different LLM models during optimization? Current design uses the model from the agent's LLM context.
 
 4. **Demo type erasure:** `OptimizationConfig` stores `List<Demonstration<*, *>>`. Typed access via `getTypedDemonstrations<TInput, TOutput>()` performs an unchecked cast. This works but isn't fully type-safe at the config level.
+
+5. **Agent execution for BootstrapFewShot:** Resolved. `BootstrapFewShot` takes agent components (`promptExecutor`, `agentConfig`, `strategy`, `toolRegistry`) and builds its own teacher agent per-example. No shared optimizer interface — each optimizer defines its own `optimize()` signature. `StrategyOptimizer` interface was removed as premature abstraction.
 
 ## Design Principles
 
