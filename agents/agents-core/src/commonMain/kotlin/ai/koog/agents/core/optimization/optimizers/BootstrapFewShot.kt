@@ -13,6 +13,7 @@ import ai.koog.agents.core.optimization.core.OptimizationResult
 import ai.koog.agents.core.optimization.features.TraceCollectionFeature
 import ai.koog.agents.core.optimization.features.TraceCollectionFeatureImpl
 import ai.koog.agents.core.optimization.features.collectTraces
+import ai.koog.agents.core.optimization.util.sampleLabeledDemonstrations
 import ai.koog.agents.core.optimization.util.findOptimizableModules
 import ai.koog.agents.core.tools.ToolRegistry
 import ai.koog.prompt.executor.model.PromptExecutor
@@ -112,7 +113,7 @@ public class BootstrapFewShot(
      * @param strategy The strategy to optimize. Must contain [OptimizableNode]s.
      * @param trainset Training examples to bootstrap from.
      * @param toolRegistry Tools available to the agent. Defaults to empty.
-     * @param valset Validation set. If null, unused training examples become the validation set.
+     * @param nonTrainSet Dataset to be used for labeled few shot examples. If null, unused training examples become the nonTrainSet set.
      * @param metric Optional metric to evaluate bootstrap quality. If null, all bootstraps are accepted.
      * @param inputFromExample Maps an [Example] to the strategy's typed input.
      * @return The optimization result with bootstrapped + labeled demonstrations.
@@ -123,7 +124,7 @@ public class BootstrapFewShot(
         strategy: AIAgentGraphStrategy<TInput, TOutput>,
         trainset: Dataset,
         toolRegistry: ToolRegistry = ToolRegistry.EMPTY,
-        valset: Dataset? = null,
+        nonTrainSet: Dataset? = null,
         metric: Metric<TOutput>? = null,
         inputFromExample: (Example) -> TInput,
     ): OptimizationResult {
@@ -140,18 +141,15 @@ public class BootstrapFewShot(
 
         // Step 1: Teacher pre-optimization with LabeledFewShot
         val teacherConfig = if (maxLabeledDemos > 0) {
-            val labeledFewShot = LabeledFewShot(k = maxLabeledDemos, sample = true, random = random)
-            labeledFewShot.optimize(
-                strategy = strategy,
-                trainset = trainset,
-                metric = metric ?: { _, _ -> 0.0 },
-            ).config
+            OptimizationConfig(
+                demonstrations = modules.associate { it.name to sampleLabeledDemonstrations(it.demonstrations, true, maxLabeledDemos, random) }
+            )
         } else {
             OptimizationConfig()
         }
 
-        // Step 2: Bootstrap — collect traces from teacher executions
-        val (name2traces, bootstrapValset) = bootstrap(
+        // Step 2: Bootstrap - collect traces from teacher executions
+        val (name2traces, bootstrapNonTrainset) = bootstrap(
             promptExecutor = promptExecutor,
             agentConfig = agentConfig,
             strategy = strategy,
@@ -163,9 +161,9 @@ public class BootstrapFewShot(
             inputFromExample = inputFromExample,
         )
 
-        // Step 3: Train — build student config from bootstrapped + labeled demos
-        val effectiveValset = valset ?: bootstrapValset
-        val config = train(modules, name2traces, effectiveValset)
+        // Step 3: Train - build student config from bootstrapped + labeled demos
+        val labeledExamples = nonTrainSet ?: bootstrapNonTrainset
+        val config = train(modules, name2traces, labeledExamples)
 
         val totalBootstrapped = name2traces.values.sumOf { it.size }
 
@@ -186,7 +184,7 @@ public class BootstrapFewShot(
     /**
      * Bootstrap phase: runs teacher on training examples and collects traces from successful runs.
      *
-     * @return Pair of (per-node traces map, validation set of non-bootstrapped examples)
+     * @return Pair of (map of nodes to bootstrapped demonstrations, dataset of training examples that were not bootstrapped successfully)
      */
     private suspend fun <TInput, TOutput> bootstrap(
         promptExecutor: PromptExecutor,
@@ -244,11 +242,12 @@ public class BootstrapFewShot(
             }
         }
 
-        // Validation set: training examples NOT bootstrapped, shuffled
-        val valset = trainset.filterIndexed { index, _ -> index !in bootstrappedIndices }
+        // Training examples that were NOT bootstrapped remain ordinary examples, i.e. labeled few shot examples
+        // Our optimizer shuffles them
+        val notBootstrapped = trainset.filterIndexed { index, _ -> index !in bootstrappedIndices }
             .shuffled(random)
 
-        return name2traces to valset
+        return name2traces to notBootstrapped
     }
 
     /**
@@ -289,8 +288,16 @@ public class BootstrapFewShot(
             .feature(TraceCollectionFeatureImpl::class, TraceCollectionFeature)
             ?: error("TraceCollectionFeature should have been installed on teacher agent")
 
-        // Filter teacher demos: remove demos matching current example's input to prevent data leakage
-        val filteredConfig = filterTeacherDemos(teacherConfig, modules, example)
+        // Filter teacher demos: remove demos whose input and output both come from the
+        // current example's data, to prevent the teacher from parroting the ground truth.
+        val exampleValues = example.data.values.toSet()
+        val filteredDemos = teacherConfig.demonstrations.mapValues { (_, demos) ->
+            demos.filterNot { it.input in exampleValues && it.output in exampleValues }
+        }
+        val filteredConfig = OptimizationConfig(
+            instructions = teacherConfig.instructions,
+            demonstrations = filteredDemos,
+        )
 
         // Run teacher
         val output: TOutput
@@ -323,35 +330,6 @@ public class BootstrapFewShot(
     }
 
     /**
-     * Filters teacher demonstrations to prevent data leakage.
-     *
-     * Removes any demonstration whose input matches the current example's input field value
-     * for each optimizable module.
-     */
-    private fun filterTeacherDemos(
-        teacherConfig: OptimizationConfig,
-        modules: List<OptimizableNode<*, *>>,
-        example: Example,
-    ): OptimizationConfig {
-        val filteredDemos = teacherConfig.demonstrations.toMutableMap()
-
-        for (module in modules) {
-            val inputField = module.inputField ?: continue
-            val exampleInput = example[inputField] ?: continue
-            val demos = filteredDemos[module.name] ?: continue
-
-            filteredDemos[module.name] = demos.filter { demo ->
-                demo.input != exampleInput
-            }
-        }
-
-        return OptimizationConfig(
-            instructions = teacherConfig.instructions,
-            demonstrations = filteredDemos,
-        )
-    }
-
-    /**
      * Builds the student [OptimizationConfig] from bootstrapped traces and labeled fallback.
      *
      * For each module:
@@ -361,7 +339,7 @@ public class BootstrapFewShot(
     private fun train(
         modules: List<OptimizableNode<*, *>>,
         name2traces: Map<String, List<Demonstration<Any?, Any?>>>,
-        valset: Dataset,
+        labeledExamples: Dataset,
     ): OptimizationConfig {
         val demonstrations = mutableMapOf<String, List<Demonstration<*, *>>>()
 
@@ -371,25 +349,11 @@ public class BootstrapFewShot(
 
             // Calculate remaining labeled demo slots
             val remaining = (maxLabeledDemos - bootstrapped.size).coerceAtLeast(0)
-                .coerceAtMost(valset.size)
+                .coerceAtMost(labeledExamples.size)
 
             val labeled = if (remaining > 0) {
-                val inField = module.inputField
-                val outField = module.outputField
-                if (inField != null && outField != null) {
-                    valset.shuffled(random)
-                        .filter { it.data.containsKey(inField) && it.data.containsKey(outField) }
-                        .take(remaining)
-                        .map { example ->
-                            Demonstration(
-                                input = example.data[inField]!!,
-                                output = example.data[outField]!!,
-                                isBootstrapped = false,
-                            )
-                        }
-                } else {
-                    emptyList()
-                }
+                // TODO: Double check again
+                sampleLabeledDemonstrations(module.demonstrations, true, remaining, random)
             } else {
                 emptyList()
             }
