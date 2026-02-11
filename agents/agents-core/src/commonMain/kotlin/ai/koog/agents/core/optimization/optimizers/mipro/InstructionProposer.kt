@@ -8,9 +8,12 @@ import ai.koog.agents.core.optimization.util.describeForOptimization
 import ai.koog.agents.core.optimization.util.findOptimizableModules
 import ai.koog.prompt.executor.model.PromptExecutor
 import ai.koog.prompt.llm.LLModel
+import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlin.random.Random
 import kotlin.reflect.KClass
 import kotlin.reflect.KType
+
+private val logger = KotlinLogging.logger {}
 
 /**
  * Tips for instruction generation, randomly selected to encourage diversity.
@@ -43,6 +46,8 @@ public data class InstructionProposerConfig(
     val numDemosInContext: Int = 3,
     val useTip: Boolean = true,
     val setTipRandomly: Boolean = true,
+    val useInstructHistory: Boolean = false,
+    val setHistoryRandomly: Boolean = false,
 )
 
 /**
@@ -64,88 +69,76 @@ public data class InstructionProposerConfig(
  * @param config Configuration options
  * @param random Random instance for reproducibility
  */
-public class InstructionProposer(
+public class InstructionProposer private constructor(
     private val strategy: AIAgentGraphStrategy<*, *>,
-    private val trainset: Dataset,
+    private val renderedExamples: List<String>,
     private val promptExecutor: PromptExecutor,
     private val llModel: LLModel,
-    private val config: InstructionProposerConfig = InstructionProposerConfig(),
-    private val random: Random = Random.Default,
-    programDescription: String? = null,
+    private val config: InstructionProposerConfig,
+    private val random: Random,
+    private val userProgramDescription: String?,
+    private val datasetSummary: String?,
+    private val programCode: String?,
 ) {
-    private var datasetSummary: String? = null
-    private var programCode: String? = null
-    private var programDescription: String? = programDescription
-    private val moduleDescriptions: MutableMap<String, String> = mutableMapOf()
+    public companion object {
+        private const val MAX_INSTRUCT_IN_HISTORY = 5
 
-    /**
-     * Initialize the proposer by generating dataset summary, program description,
-     * and per-module descriptions.
-     *
-     * If a [programDescription] was provided in the constructor, it is used as-is.
-     * Otherwise, if [InstructionProposerConfig.programAware] is true, the LLM generates one.
-     *
-     * Similarly, if an [OptimizableNode] has a non-null [OptimizableNode.description],
-     * it is used directly. Otherwise, if programAware, the LLM generates a description
-     * of the module's role.
-     *
-     * Call this before [proposeInstructionsForProgram].
-     */
-    public suspend fun initialize() {
-        if (config.useDatasetSummary) {
-            try {
-                datasetSummary = createDatasetSummary(
-                    trainset = trainset,
-                    promptExecutor = promptExecutor,
-                    llModel = llModel,
-                )
-            } catch (_: Exception) {
-                // Continue without dataset summary
-            }
-        }
-
-        if (config.programAware) {
-            try {
-                programCode = strategy.describeForOptimization()
-            } catch (_: Exception) {
-                // Continue without program code
-            }
-        }
-
-        // Generate program description via LLM if not user-provided
-        if (programDescription == null && config.programAware && programCode != null) {
-            try {
-                val programExample = formatTrainsetExample()
-                val prompt = describeProgramPrompt(programCode!!, programExample)
-                val responses = promptExecutor.execute(prompt, llModel)
-                programDescription = extractAssistantContent(responses).ifBlank { null }
-            } catch (_: Exception) {
-                // Continue without program description
-            }
-        }
-
-        // Generate per-module descriptions
-        if (config.programAware) {
-            val modules = strategy.findOptimizableModules()
-            for (module in modules) {
-                if (module.description != null) {
-                    // User-provided description on the node
-                    moduleDescriptions[module.name] = module.description
-                } else if (programCode != null && programDescription != null) {
-                    // LLM-generated description
-                    try {
-                        val moduleCode = buildModuleCodeString(module.name, module)
-                        val prompt = describeModulePrompt(programCode!!, programDescription!!, moduleCode)
-                        val responses = promptExecutor.execute(prompt, llModel)
-                        val desc = extractAssistantContent(responses).ifBlank { null }
-                        if (desc != null) {
-                            moduleDescriptions[module.name] = desc
-                        }
-                    } catch (_: Exception) {
-                        // Continue without this module's description
-                    }
+        /**
+         * Create an [InstructionProposer], generating dataset summary and program code upfront.
+         *
+         * Program and module descriptions are generated per-call in [proposeInstructionForNode]
+         * to adapt to varying task demo context (matching DSPy's GroundedProposer.forward()).
+         *
+         * User-provided descriptions ([programDescription] and [OptimizableNode.description])
+         * always skip LLM generation.
+         *
+         * @param describeInput Renders an input value as a human-readable string for dataset
+         *  summarization and example display. Defaults to [toString].
+         */
+        public suspend fun <TInput, TOutput> create(
+            strategy: AIAgentGraphStrategy<*, *>,
+            trainset: Dataset<TInput, TOutput>,
+            promptExecutor: PromptExecutor,
+            llModel: LLModel,
+            config: InstructionProposerConfig = InstructionProposerConfig(),
+            random: Random = Random.Default,
+            programDescription: String? = null,
+            describeInput: (TInput) -> String = { it.toString() },
+        ): InstructionProposer {
+            val renderedExamples = trainset.map { ex ->
+                buildString {
+                    append(describeInput(ex.input))
+                    if (ex.hasLabel) append("\nlabel: ${ex.label}")
                 }
             }
+
+            val datasetSummary = if (config.useDatasetSummary) {
+                try {
+                    createDatasetSummary(renderedExamples, promptExecutor, llModel)
+                } catch (_: Exception) {
+                    null
+                }
+            } else null
+
+            val programCode = if (config.programAware) {
+                try {
+                    strategy.describeForOptimization()
+                } catch (_: Exception) {
+                    null
+                }
+            } else null
+
+            return InstructionProposer(
+                strategy = strategy,
+                renderedExamples = renderedExamples,
+                promptExecutor = promptExecutor,
+                llModel = llModel,
+                config = config,
+                random = random,
+                userProgramDescription = programDescription,
+                datasetSummary = datasetSummary,
+                programCode = programCode,
+            )
         }
     }
 
@@ -154,9 +147,8 @@ public class InstructionProposer(
      * Matches DSPy's use of task_demos as program_example.
      */
     private fun formatTrainsetExample(): String {
-        if (trainset.isEmpty()) return "No examples available."
-        val example = trainset.first()
-        return example.data.entries.joinToString("\n") { (k, v) -> "$k: $v" }
+        if (renderedExamples.isEmpty()) return "No examples available."
+        return renderedExamples.first()
     }
 
     /**
@@ -174,9 +166,13 @@ public class InstructionProposer(
     public suspend fun proposeInstructionsForProgram(
         demoCandidates: Map<String, List<List<Demonstration<*, *>>>>?,
         numCandidates: Int,
+        previousInstructions: Map<String, List<Pair<String, Double>>> = emptyMap(),
     ): Map<String, List<String>> {
         val modules = strategy.findOptimizableModules()
         val proposedInstructions = mutableMapOf<String, MutableList<String>>()
+
+        // Gap 3: 50/50 coin flip to toggle instruction history for this round
+        val effectiveUseHistory = if (config.setHistoryRandomly) random.nextBoolean() else config.useInstructHistory
 
         // Determine how many demo sets we have (or default to numCandidates if no demos)
         val numDemoSets = if (demoCandidates.isNullOrEmpty() || !config.useTaskDemos) {
@@ -186,22 +182,25 @@ public class InstructionProposer(
             minOf(firstModuleDemos, numCandidates)
         }
 
-        for (module in modules) {
+        for ((moduleIdx, module) in modules.withIndex()) {
             val moduleName = module.name
             proposedInstructions[moduleName] = mutableListOf()
+            logger.info { "Proposing instructions for module '${moduleName}' (${moduleIdx + 1}/${modules.size})..." }
 
             for (demoSetIndex in 0 until numDemoSets) {
                 val tip = selectTip()
 
-                val instruction = proposeInstructionForModule(
-                    moduleName = moduleName,
-                    module = module,
+                val instruction = proposeInstructionForNode(
+                    node = module,
                     demoCandidates = demoCandidates,
                     demoSetIndex = demoSetIndex,
                     tip = tip,
+                    effectiveUseHistory = effectiveUseHistory,
+                    previousInstructions = previousInstructions,
                 )
 
                 proposedInstructions[moduleName]!!.add(instruction)
+                logger.info { "  Candidate ${demoSetIndex + 1}/$numDemoSets generated" }
             }
         }
 
@@ -210,24 +209,69 @@ public class InstructionProposer(
 
     /**
      * Generate a single instruction for a specific node.
+     *
+     * Program and module descriptions are generated fresh per-call to adapt to
+     * the varying task demo context (Gap 4). User-provided descriptions skip LLM.
      */
-    private suspend fun proposeInstructionForModule(
-        moduleName: String,
-        module: OptimizableNode<*, *>,
+    private suspend fun proposeInstructionForNode(
+        node: OptimizableNode<*, *>,
         demoCandidates: Map<String, List<List<Demonstration<*, *>>>>?,
         demoSetIndex: Int,
         tip: String?,
+        effectiveUseHistory: Boolean,
+        previousInstructions: Map<String, List<Pair<String, Double>>>,
     ): String {
-        val moduleCodeString = buildModuleCodeString(moduleName, module)
-        val taskDemos = gatherTaskDemos(moduleName, demoCandidates, demoSetIndex)
-        val basicInstruction = module.instruction
+        val nodeName = node.name
+        val moduleCodeString = buildModuleCodeString(nodeName, node)
+        val taskDemos = gatherTaskDemos(nodeName, demoCandidates, demoSetIndex)
+        val basicInstruction = node.instruction
+
+        // Gap 4: Per-call program description
+        val currentProgramDescription = if (userProgramDescription != null) {
+            userProgramDescription
+        } else if (config.programAware && programCode != null) {
+            try {
+                val prompt = describeProgramPrompt(programCode!!, taskDemos)
+                val responses = promptExecutor.execute(prompt, llModel)
+                extractAssistantContent(responses).ifBlank { null }
+            } catch (_: Exception) {
+                null
+            }
+        } else {
+            null
+        }
+
+        // Gap 4: Per-call module description
+        val currentModuleDescription = if (node.description != null) {
+            node.description
+        } else if (config.programAware && programCode != null && currentProgramDescription != null) {
+            try {
+                // Gap 5: Pass taskDemos as programExample
+                val prompt = describeModulePrompt(programCode!!, currentProgramDescription, taskDemos, moduleCodeString)
+                val responses = promptExecutor.execute(prompt, llModel)
+                extractAssistantContent(responses).ifBlank { null }
+            } catch (_: Exception) {
+                null
+            }
+        } else {
+            null
+        }
+
+        // Gap 2: Format instruction history if enabled
+        val historyString = if (effectiveUseHistory) {
+            formatInstructionHistory(nodeName, previousInstructions)
+        } else {
+            null
+        }
 
         val promptConfig = GenerateInstructionPromptConfig(
             datasetSummary = datasetSummary,
-            programDescription = programDescription,
+            programCode = programCode,
+            programDescription = currentProgramDescription,
             moduleCodeString = moduleCodeString,
-            moduleDescription = moduleDescriptions[moduleName],
+            moduleDescription = currentModuleDescription,
             taskDemos = taskDemos,
+            previousInstructions = historyString,
             basicInstruction = basicInstruction,
             tip = if (config.useTip) tip else null,
         )
@@ -240,6 +284,31 @@ public class InstructionProposer(
             stripInstructionPrefixes(proposedInstruction).ifBlank { basicInstruction }
         } catch (_: Exception) {
             basicInstruction
+        }
+    }
+
+    /**
+     * Format instruction history for a module, sorted by score descending, taking top N, reversed.
+     *
+     * Matches DSPy's format: `"instruction text" | Score: X.XX`
+     */
+    private fun formatInstructionHistory(
+        moduleName: String,
+        previousInstructions: Map<String, List<Pair<String, Double>>>,
+        maxHistory: Int = MAX_INSTRUCT_IN_HISTORY,
+    ): String? {
+        val history = previousInstructions[moduleName] ?: return null
+        if (history.isEmpty()) return null
+
+        val topEntries = history
+            .sortedByDescending { it.second }
+            .take(maxHistory)
+            .reversed()
+
+        return topEntries.joinToString("\n") { (instruction, score) ->
+            val whole = score.toInt()
+            val frac = ((score - whole) * 100 + 0.5).toInt()
+            "\"$instruction\" | Score: $whole.${frac.toString().padStart(2, '0')}"
         }
     }
 

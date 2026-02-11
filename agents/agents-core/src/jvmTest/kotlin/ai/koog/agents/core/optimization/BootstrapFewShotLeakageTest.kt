@@ -1,17 +1,13 @@
 package ai.koog.agents.core.optimization
 
-import ai.koog.agents.core.agent.AIAgent
 import ai.koog.agents.core.agent.config.AIAgentConfig
 import ai.koog.agents.core.dsl.builder.forwardTo
 import ai.koog.agents.core.dsl.builder.strategy
 import ai.koog.agents.core.optimization.core.Demonstration
 import ai.koog.agents.core.optimization.core.Example
 import ai.koog.agents.core.optimization.core.Metric
-import ai.koog.agents.core.optimization.core.OptimizationResult
 import ai.koog.agents.core.optimization.optimizers.BootstrapFewShot
-import ai.koog.agents.core.optimization.util.toAgent
 import ai.koog.agents.core.tools.ToolDescriptor
-import ai.koog.agents.core.tools.ToolRegistry
 import ai.koog.agents.testing.tools.getMockExecutor
 import ai.koog.prompt.dsl.Prompt
 import ai.koog.prompt.executor.clients.openai.OpenAIModels
@@ -41,23 +37,20 @@ import kotlin.test.assertTrue
  * This test catches that regression by using a custom executor that returns different
  * responses depending on whether the ground truth demo is present in the prompt.
  */
-class BootstrapFewShotTestRegression {
+class BootstrapFewShotLeakageTest {
 
     private val trainset = listOf(
-        Example(
-            data = mapOf("question" to "Question 0", "thinking" to "Thinking 0", "answer" to "Answer 0"),
-            labelKey = "answer"
-        ),
+        Example(input = "Question 0", label = "Answer 0"),
     )
 
     private val simpleStrategy = strategy("test") {
         val thinking by optimizableNode(
             instruction = "Think about the question",
-            demonstrations = trainset.map { Demonstration(it.data["question"] as String, it.data["thinking"] as String, false) }
+            demonstrations = listOf(Demonstration("Question 0", "Thinking 0", false))
         )
         val answer by optimizableNode(
             instruction = "Answer the question",
-            demonstrations = trainset.map { Demonstration(it.data["thinking"] as String, it.data["answer"] as String, false) }
+            demonstrations = listOf(Demonstration("Thinking 0", "Answer 0", false))
         )
 
         edge(nodeStart forwardTo thinking)
@@ -90,11 +83,7 @@ class BootstrapFewShotTestRegression {
         capturedPrompts: MutableList<Prompt>? = null,
     ): PromptExecutor {
         // Base executor only needed for interface delegation (executeStreaming, moderate, close, etc.)
-        val baseExecutor = getMockExecutor {
-            mockLLMAnswer("unused")
-        }
-
-        return object : PromptExecutor by baseExecutor {
+        return object : PromptExecutor by getMockExecutor(init = { }) {
             private fun respond(prompt: Prompt): List<Message.Response> {
                 capturedPrompts?.add(prompt)
                 val systemContent = prompt.messages.firstOrNull()?.content ?: ""
@@ -104,11 +93,7 @@ class BootstrapFewShotTestRegression {
                     // Check if ground truth "Thinking 0" appears as an assistant message in the demos.
                     // Prompt structure: system, [user(demo.input), assistant(demo.output)]*, user(input)
                     // Demos are all messages between system (first) and final user input (last).
-                    val demoMessages = if (prompt.messages.size > 2) {
-                        prompt.messages.subList(1, prompt.messages.size - 1)
-                    } else {
-                        emptyList()
-                    }
+                    val demoMessages = prompt.messages.subList(1, prompt.messages.size - 1)
                     val hasGroundTruthInDemos = demoMessages.any {
                         it is Message.Assistant && it.content == "Thinking 0"
                     }
@@ -166,7 +151,6 @@ class BootstrapFewShotTestRegression {
                 strategy = simpleStrategy,
                 trainset = trainset,
                 metric = exactMatch,
-                inputFromExample = { it["question"] as String },
             )
         }
 
@@ -214,7 +198,6 @@ class BootstrapFewShotTestRegression {
                 strategy = simpleStrategy,
                 trainset = trainset,
                 metric = exactMatch,
-                inputFromExample = { it["question"] as String },
             )
         }
 
@@ -226,11 +209,7 @@ class BootstrapFewShotTestRegression {
 
         // The teacher's thinking prompt should NOT contain "Thinking 0" as an assistant demo
         for (prompt in thinkingPrompts) {
-            val demoMessages = if (prompt.messages.size > 2) {
-                prompt.messages.subList(1, prompt.messages.size - 1)
-            } else {
-                emptyList()
-            }
+            val demoMessages = prompt.messages.subList(1, prompt.messages.size - 1)
             val assistantDemos = demoMessages.filterIsInstance<Message.Assistant>()
             val leakedDemos = assistantDemos.filter { it.content == "Thinking 0" }
 

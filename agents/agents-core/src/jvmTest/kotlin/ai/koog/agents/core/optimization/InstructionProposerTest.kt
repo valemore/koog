@@ -18,26 +18,19 @@ import ai.koog.prompt.message.Message
 import ai.koog.prompt.message.ResponseMetaInfo
 import kotlinx.coroutines.runBlocking
 import kotlinx.datetime.Clock
+import kotlin.random.Random
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 class InstructionProposerTest {
 
     private val trainset = listOf(
-        Example(
-            data = mapOf("question" to "What is 2+2?", "answer" to "4"),
-            labelKey = "answer"
-        ),
-        Example(
-            data = mapOf("question" to "What is 3+3?", "answer" to "6"),
-            labelKey = "answer"
-        ),
-        Example(
-            data = mapOf("question" to "What is 5+5?", "answer" to "10"),
-            labelKey = "answer"
-        ),
+        Example(input = "What is 2+2?", label = "4"),
+        Example(input = "What is 3+3?", label = "6"),
+        Example(input = "What is 5+5?", label = "10"),
     )
 
     private val twoNodeStrategy = strategy("test-strategy") {
@@ -82,11 +75,7 @@ class InstructionProposerTest {
      * @param trackCalls If non-null, appends prompt names to this list for call tracking
      */
     private fun createMockExecutor(trackCalls: MutableList<String>? = null): PromptExecutor {
-        val baseExecutor = getMockExecutor {
-            mockLLMAnswer("unused")
-        }
-
-        return object : PromptExecutor by baseExecutor {
+        return object : PromptExecutor by getMockExecutor(init = { }) {
             private fun respond(prompt: Prompt): List<Message.Response> {
                 val systemContent = prompt.messages.firstOrNull()?.content ?: ""
                 val userContent = prompt.messages.lastOrNull()?.content ?: ""
@@ -153,6 +142,8 @@ class InstructionProposerTest {
         assertEquals(3, config.numDemosInContext)
         assertTrue(config.useTip)
         assertTrue(config.setTipRandomly)
+        assertFalse(config.useInstructHistory)
+        assertFalse(config.setHistoryRandomly)
     }
 
     @Test
@@ -191,14 +182,13 @@ class InstructionProposerTest {
     @Test
     fun testCorrectNumberOfCandidatesPerModule() = runBlocking {
         val executor = createMockExecutor()
-        val proposer = InstructionProposer(
+        val proposer = InstructionProposer.create(
             strategy = twoNodeStrategy,
             trainset = trainset,
             promptExecutor = executor,
             llModel = llModel,
         )
 
-        proposer.initialize()
 
         val numCandidates = 4
         val result = proposer.proposeInstructionsForProgram(
@@ -219,14 +209,13 @@ class InstructionProposerTest {
     @Test
     fun testWithDemoCandidatesProducesNonBlankInstructions() = runBlocking {
         val executor = createMockExecutor()
-        val proposer = InstructionProposer(
+        val proposer = InstructionProposer.create(
             strategy = twoNodeStrategy,
             trainset = trainset,
             promptExecutor = executor,
             llModel = llModel,
         )
 
-        proposer.initialize()
 
         val demoCandidates = mapOf(
             "thinking" to listOf(
@@ -259,14 +248,13 @@ class InstructionProposerTest {
     @Test
     fun testRespectsDemoSetCountLimit() = runBlocking {
         val executor = createMockExecutor()
-        val proposer = InstructionProposer(
+        val proposer = InstructionProposer.create(
             strategy = twoNodeStrategy,
             trainset = trainset,
             promptExecutor = executor,
             llModel = llModel,
         )
 
-        proposer.initialize()
 
         // Only 2 demo sets available
         val demoCandidates = mapOf(
@@ -299,7 +287,7 @@ class InstructionProposerTest {
             useTaskDemos = false,
             useTip = false,
         )
-        val proposer = InstructionProposer(
+        val proposer = InstructionProposer.create(
             strategy = twoNodeStrategy,
             trainset = trainset,
             promptExecutor = executor,
@@ -307,7 +295,6 @@ class InstructionProposerTest {
             config = config,
         )
 
-        proposer.initialize()
 
         val result = proposer.proposeInstructionsForProgram(
             demoCandidates = null,
@@ -340,7 +327,7 @@ class InstructionProposerTest {
     fun testUserProvidedProgramDescriptionSkipsLLMCall() = runBlocking {
         val calls = mutableListOf<String>()
         val executor = createMockExecutor(trackCalls = calls)
-        val proposer = InstructionProposer(
+        val proposer = InstructionProposer.create(
             strategy = twoNodeStrategy,
             trainset = trainset,
             promptExecutor = executor,
@@ -348,7 +335,7 @@ class InstructionProposerTest {
             programDescription = "User-provided program description",
         )
 
-        proposer.initialize()
+        proposer.proposeInstructionsForProgram(demoCandidates = null, numCandidates = 1)
 
         // Should NOT have called describe-program since we provided a description
         assertTrue(
@@ -362,14 +349,14 @@ class InstructionProposerTest {
         // twoNodeStrategy has descriptions on both nodes ("Reasoning node", "Answer node")
         val calls = mutableListOf<String>()
         val executor = createMockExecutor(trackCalls = calls)
-        val proposer = InstructionProposer(
+        val proposer = InstructionProposer.create(
             strategy = twoNodeStrategy,
             trainset = trainset,
             promptExecutor = executor,
             llModel = llModel,
         )
 
-        proposer.initialize()
+        proposer.proposeInstructionsForProgram(demoCandidates = null, numCandidates = 1)
 
         // Should NOT have called describe-module since both nodes have descriptions
         assertTrue(
@@ -383,19 +370,27 @@ class InstructionProposerTest {
         // noDescriptionStrategy has no descriptions on nodes
         val calls = mutableListOf<String>()
         val executor = createMockExecutor(trackCalls = calls)
-        val proposer = InstructionProposer(
+        val proposer = InstructionProposer.create(
             strategy = noDescriptionStrategy,
             trainset = trainset,
             promptExecutor = executor,
             llModel = llModel,
         )
 
-        proposer.initialize()
 
-        // Should have called describe-program (no user-provided description)
+        // Descriptions are now generated per-call (Gap 4), not during create()
+        assertTrue(
+            "describe-program" !in calls,
+            "Should not call DescribeProgram during create() (now per-call)"
+        )
+
+        // Generate 1 candidate to trigger per-call describe calls
+        proposer.proposeInstructionsForProgram(demoCandidates = null, numCandidates = 1)
+
+        // Should have called describe-program during proposal
         assertTrue(
             "describe-program" in calls,
-            "Should call DescribeProgram when no programDescription provided"
+            "Should call DescribeProgram per-call when no programDescription provided"
         )
 
         // Should have called describe-module for each node without a description
@@ -408,14 +403,13 @@ class InstructionProposerTest {
         val calls = mutableListOf<String>()
         val executor = createMockExecutor(trackCalls = calls)
         // Use noDescriptionStrategy so LLM generates module descriptions
-        val proposer = InstructionProposer(
+        val proposer = InstructionProposer.create(
             strategy = noDescriptionStrategy,
             trainset = trainset,
             promptExecutor = executor,
             llModel = llModel,
         )
 
-        proposer.initialize()
 
         val result = proposer.proposeInstructionsForProgram(
             demoCandidates = null,
@@ -444,7 +438,7 @@ class InstructionProposerTest {
             programAware = false,
             useDatasetSummary = false,
         )
-        val proposer = InstructionProposer(
+        val proposer = InstructionProposer.create(
             strategy = noDescriptionStrategy,
             trainset = trainset,
             promptExecutor = executor,
@@ -452,9 +446,472 @@ class InstructionProposerTest {
             config = config,
         )
 
-        proposer.initialize()
+        proposer.proposeInstructionsForProgram(demoCandidates = null, numCandidates = 1)
 
         assertTrue("describe-program" !in calls, "Should not call DescribeProgram when programAware=false")
         assertTrue("describe-module" !in calls, "Should not call DescribeModule when programAware=false")
+    }
+
+    /**
+     * Creates a mock executor that also captures all prompt user-content for inspection.
+     */
+    private fun createPromptCapturingExecutor(
+        capturedPrompts: MutableList<Pair<String, String>>,
+        trackCalls: MutableList<String>? = null,
+    ): PromptExecutor {
+        return object : PromptExecutor by getMockExecutor(init = { }) {
+            private fun respond(prompt: Prompt): List<Message.Response> {
+                val systemContent = prompt.messages.firstOrNull()?.content ?: ""
+                val userContent = prompt.messages.lastOrNull()?.content ?: ""
+                val metaInfo = ResponseMetaInfo.create(Clock.System)
+
+                // Capture all prompts
+                capturedPrompts.add(systemContent to userContent)
+
+                // Dataset descriptor
+                if ("write observations about trends" in systemContent) {
+                    trackCalls?.add("dataset-descriptor")
+                    if ("PRIOR OBSERVATIONS" in userContent) {
+                        return listOf(Message.Assistant("Additional observation.", metaInfo))
+                    }
+                    return listOf(Message.Assistant("The dataset contains arithmetic questions.", metaInfo))
+                }
+
+                // Observation summarizer
+                if ("summarize them into a brief" in systemContent) {
+                    trackCalls?.add("observation-summarizer")
+                    return listOf(Message.Assistant("Arithmetic questions with numeric answers.", metaInfo))
+                }
+
+                // DescribeProgram
+                if ("describe what task this program is designed to solve" in systemContent) {
+                    trackCalls?.add("describe-program")
+                    return listOf(Message.Assistant("This program solves arithmetic questions.", metaInfo))
+                }
+
+                // DescribeModule
+                if ("describe the role of the specified module" in systemContent) {
+                    trackCalls?.add("describe-module")
+                    return listOf(Message.Assistant("The module handles its step.", metaInfo))
+                }
+
+                // Instruction generation
+                if ("generate a new instruction" in systemContent) {
+                    trackCalls?.add("generate-instruction")
+                    val moduleName = when {
+                        "thinking" in userContent -> "thinking"
+                        "answer" in userContent -> "answer"
+                        else -> "unknown"
+                    }
+                    return listOf(Message.Assistant("Carefully analyze the $moduleName step.", metaInfo))
+                }
+
+                return listOf(Message.Assistant("Default mock response", metaInfo))
+            }
+
+            override suspend fun execute(prompt: Prompt, model: LLModel, tools: List<ToolDescriptor>): List<Message.Response> = respond(prompt)
+            override suspend fun execute(prompt: Prompt, model: LLModel): List<Message.Response> = respond(prompt)
+        }
+    }
+
+    // ---- Gap 1: programCode in instruction generation prompt ----
+
+    @Test
+    fun testPromptContainsProgramCodeAndProgramDescriptionSections() = runBlocking {
+        val capturedPrompts = mutableListOf<Pair<String, String>>()
+        val executor = createPromptCapturingExecutor(capturedPrompts)
+        val proposer = InstructionProposer.create(
+            strategy = noDescriptionStrategy,
+            trainset = trainset,
+            promptExecutor = executor,
+            llModel = llModel,
+        )
+
+        proposer.proposeInstructionsForProgram(demoCandidates = null, numCandidates = 1)
+
+        // Find instruction generation prompts
+        val instructionPrompts = capturedPrompts.filter { (sys, _) ->
+            "generate a new instruction" in sys
+        }
+
+        assertTrue(instructionPrompts.isNotEmpty(), "Should have instruction generation prompts")
+
+        for ((_, userContent) in instructionPrompts) {
+            assertTrue("PROGRAM CODE:" in userContent, "Should contain PROGRAM CODE: section")
+            assertTrue("PROGRAM DESCRIPTION:" in userContent, "Should contain PROGRAM DESCRIPTION: section")
+            // Verify PROGRAM CODE comes before PROGRAM DESCRIPTION
+            val codeIndex = userContent.indexOf("PROGRAM CODE:")
+            val descIndex = userContent.indexOf("PROGRAM DESCRIPTION:")
+            assertTrue(codeIndex < descIndex, "PROGRAM CODE should come before PROGRAM DESCRIPTION")
+        }
+    }
+
+    @Test
+    fun testPromptUsesModuleSectionName() = runBlocking {
+        val capturedPrompts = mutableListOf<Pair<String, String>>()
+        val executor = createPromptCapturingExecutor(capturedPrompts)
+        val proposer = InstructionProposer.create(
+            strategy = noDescriptionStrategy,
+            trainset = trainset,
+            promptExecutor = executor,
+            llModel = llModel,
+        )
+
+        proposer.proposeInstructionsForProgram(demoCandidates = null, numCandidates = 1)
+
+        val instructionPrompts = capturedPrompts.filter { (sys, _) ->
+            "generate a new instruction" in sys
+        }
+
+        for ((_, userContent) in instructionPrompts) {
+            // Should use MODULE: not MODULE TO OPTIMIZE:
+            assertTrue("MODULE:" in userContent, "Should contain MODULE: section")
+            assertFalse("MODULE TO OPTIMIZE:" in userContent, "Should not contain old MODULE TO OPTIMIZE: name")
+            // Should use PROGRAM DESCRIPTION: not PROGRAM STRUCTURE:
+            assertFalse("PROGRAM STRUCTURE:" in userContent, "Should not contain old PROGRAM STRUCTURE: name")
+        }
+    }
+
+    // ---- Gap 2: Previous instructions / instruction history ----
+
+    @Test
+    fun testPreviousInstructionsAppearsWhenHistoryEnabled() = runBlocking {
+        val capturedPrompts = mutableListOf<Pair<String, String>>()
+        val executor = createPromptCapturingExecutor(capturedPrompts)
+        val config = InstructionProposerConfig(
+            useInstructHistory = true,
+            useDatasetSummary = false,
+            programAware = false,
+        )
+        val proposer = InstructionProposer.create(
+            strategy = twoNodeStrategy,
+            trainset = trainset,
+            promptExecutor = executor,
+            llModel = llModel,
+            config = config,
+        )
+
+
+        val previousInstructions = mapOf(
+            "thinking" to listOf(
+                "Think carefully" to 0.80,
+                "Reason step by step" to 0.90,
+                "Consider all options" to 0.70,
+            ),
+            "answer" to listOf(
+                "Give final answer" to 0.85,
+            ),
+        )
+
+        proposer.proposeInstructionsForProgram(
+            demoCandidates = null,
+            numCandidates = 1,
+            previousInstructions = previousInstructions,
+        )
+
+        val instructionPrompts = capturedPrompts.filter { (sys, _) ->
+            "generate a new instruction" in sys
+        }
+
+        assertTrue(instructionPrompts.isNotEmpty(), "Should have instruction generation prompts")
+
+        for ((_, userContent) in instructionPrompts) {
+            assertTrue(
+                "PREVIOUS INSTRUCTIONS:" in userContent,
+                "Should contain PREVIOUS INSTRUCTIONS: section when useInstructHistory=true and history is non-empty"
+            )
+            assertTrue("Score:" in userContent, "Should contain Score: entries")
+        }
+    }
+
+    @Test
+    fun testPreviousInstructionsAbsentWhenHistoryDisabled() = runBlocking {
+        val capturedPrompts = mutableListOf<Pair<String, String>>()
+        val executor = createPromptCapturingExecutor(capturedPrompts)
+        val config = InstructionProposerConfig(
+            useInstructHistory = false,
+            useDatasetSummary = false,
+            programAware = false,
+        )
+        val proposer = InstructionProposer.create(
+            strategy = twoNodeStrategy,
+            trainset = trainset,
+            promptExecutor = executor,
+            llModel = llModel,
+            config = config,
+        )
+
+
+        val previousInstructions = mapOf(
+            "thinking" to listOf("Think carefully" to 0.80),
+        )
+
+        proposer.proposeInstructionsForProgram(
+            demoCandidates = null,
+            numCandidates = 1,
+            previousInstructions = previousInstructions,
+        )
+
+        val instructionPrompts = capturedPrompts.filter { (sys, _) ->
+            "generate a new instruction" in sys
+        }
+
+        for ((_, userContent) in instructionPrompts) {
+            assertFalse(
+                "PREVIOUS INSTRUCTIONS:" in userContent,
+                "Should not contain PREVIOUS INSTRUCTIONS: when useInstructHistory=false"
+            )
+        }
+    }
+
+    @Test
+    fun testPreviousInstructionsAbsentWhenHistoryEmpty() = runBlocking {
+        val capturedPrompts = mutableListOf<Pair<String, String>>()
+        val executor = createPromptCapturingExecutor(capturedPrompts)
+        val config = InstructionProposerConfig(
+            useInstructHistory = true,
+            useDatasetSummary = false,
+            programAware = false,
+        )
+        val proposer = InstructionProposer.create(
+            strategy = twoNodeStrategy,
+            trainset = trainset,
+            promptExecutor = executor,
+            llModel = llModel,
+            config = config,
+        )
+
+
+        // Empty history
+        proposer.proposeInstructionsForProgram(
+            demoCandidates = null,
+            numCandidates = 1,
+            previousInstructions = emptyMap(),
+        )
+
+        val instructionPrompts = capturedPrompts.filter { (sys, _) ->
+            "generate a new instruction" in sys
+        }
+
+        for ((_, userContent) in instructionPrompts) {
+            assertFalse(
+                "PREVIOUS INSTRUCTIONS:" in userContent,
+                "Should not contain PREVIOUS INSTRUCTIONS: when history is empty"
+            )
+        }
+    }
+
+    @Test
+    fun testInstructionHistoryFormat() = runBlocking {
+        val capturedPrompts = mutableListOf<Pair<String, String>>()
+        val executor = createPromptCapturingExecutor(capturedPrompts)
+        val config = InstructionProposerConfig(
+            useInstructHistory = true,
+            useDatasetSummary = false,
+            programAware = false,
+        )
+        val proposer = InstructionProposer.create(
+            strategy = twoNodeStrategy,
+            trainset = trainset,
+            promptExecutor = executor,
+            llModel = llModel,
+            config = config,
+        )
+
+
+        val previousInstructions = mapOf(
+            "thinking" to listOf(
+                "Instruction A" to 0.50,
+                "Instruction B" to 0.90,
+                "Instruction C" to 0.70,
+            ),
+        )
+
+        proposer.proposeInstructionsForProgram(
+            demoCandidates = null,
+            numCandidates = 1,
+            previousInstructions = previousInstructions,
+        )
+
+        // Find the thinking-module instruction prompt
+        val thinkingPrompt = capturedPrompts.filter { (sys, _) ->
+            "generate a new instruction" in sys
+        }.first { (_, user) -> "thinking" in user }
+
+        val userContent = thinkingPrompt.second
+        assertTrue("PREVIOUS INSTRUCTIONS:" in userContent)
+
+        // Sorted by score desc, then reversed → ascending order: A(0.50), C(0.70), B(0.90)
+        assertTrue("\"Instruction A\" | Score: 0.50" in userContent)
+        assertTrue("\"Instruction C\" | Score: 0.70" in userContent)
+        assertTrue("\"Instruction B\" | Score: 0.90" in userContent)
+
+        val aIndex = userContent.indexOf("Instruction A")
+        val cIndex = userContent.indexOf("Instruction C")
+        val bIndex = userContent.indexOf("Instruction B")
+        assertTrue(aIndex < cIndex, "A (0.50) should come before C (0.70)")
+        assertTrue(cIndex < bIndex, "C (0.70) should come before B (0.90)")
+    }
+
+    // ---- Gap 3: setHistoryRandomly ----
+
+    @Test
+    fun testSetHistoryRandomlyTogglesHistoryInclusion() = runBlocking {
+        // Use a seeded random that we can predict
+        // Random(42).nextBoolean() returns a deterministic sequence
+        val seed = 42
+        val expectedFirstBool = Random(seed).nextBoolean()
+
+        val capturedPrompts = mutableListOf<Pair<String, String>>()
+        val executor = createPromptCapturingExecutor(capturedPrompts)
+        val config = InstructionProposerConfig(
+            setHistoryRandomly = true,
+            useInstructHistory = false, // overridden by setHistoryRandomly
+            useDatasetSummary = false,
+            programAware = false,
+        )
+        val proposer = InstructionProposer.create(
+            strategy = twoNodeStrategy,
+            trainset = trainset,
+            promptExecutor = executor,
+            llModel = llModel,
+            config = config,
+            random = Random(seed),
+        )
+
+
+        val previousInstructions = mapOf(
+            "thinking" to listOf("Some instruction" to 0.75),
+            "answer" to listOf("Another instruction" to 0.80),
+        )
+
+        proposer.proposeInstructionsForProgram(
+            demoCandidates = null,
+            numCandidates = 1,
+            previousInstructions = previousInstructions,
+        )
+
+        val instructionPrompts = capturedPrompts.filter { (sys, _) ->
+            "generate a new instruction" in sys
+        }
+
+        // All prompts in this round should have the same history inclusion
+        val hasHistory = instructionPrompts.all { (_, user) -> "PREVIOUS INSTRUCTIONS:" in user }
+        val noHistory = instructionPrompts.all { (_, user) -> "PREVIOUS INSTRUCTIONS:" !in user }
+
+        if (expectedFirstBool) {
+            assertTrue(hasHistory, "With setHistoryRandomly and seed=$seed, history should be included")
+        } else {
+            assertTrue(noHistory, "With setHistoryRandomly and seed=$seed, history should be excluded")
+        }
+    }
+
+    // ---- Gap 4: Per-call DescribeProgram/DescribeModule ----
+
+    @Test
+    fun testDescriptionsGeneratedPerCallNotDuringInitialize() = runBlocking {
+        val calls = mutableListOf<String>()
+        val executor = createMockExecutor(trackCalls = calls)
+        val proposer = InstructionProposer.create(
+            strategy = noDescriptionStrategy,
+            trainset = trainset,
+            promptExecutor = executor,
+            llModel = llModel,
+        )
+
+
+        // After create(), no describe calls should have been made
+        assertFalse(
+            "describe-program" in calls,
+            "describe-program should not be called during create()"
+        )
+        assertFalse(
+            "describe-module" in calls,
+            "describe-module should not be called during create()"
+        )
+
+        // Now generate instructions — this should trigger describe calls
+        proposer.proposeInstructionsForProgram(demoCandidates = null, numCandidates = 1)
+
+        assertTrue(
+            "describe-program" in calls,
+            "describe-program should be called per-instruction"
+        )
+        assertTrue(
+            "describe-module" in calls,
+            "describe-module should be called per-instruction"
+        )
+    }
+
+    @Test
+    fun testPerCallDescribeCalledPerInstruction() = runBlocking {
+        val calls = mutableListOf<String>()
+        val executor = createMockExecutor(trackCalls = calls)
+        val proposer = InstructionProposer.create(
+            strategy = noDescriptionStrategy,
+            trainset = trainset,
+            promptExecutor = executor,
+            llModel = llModel,
+        )
+
+
+        // Generate 3 candidates → 3 calls per module × 2 modules = 6 describe-program, 6 describe-module
+        proposer.proposeInstructionsForProgram(demoCandidates = null, numCandidates = 3)
+
+        val describeProgramCalls = calls.count { it == "describe-program" }
+        val describeModuleCalls = calls.count { it == "describe-module" }
+
+        // 2 modules × 3 candidates = 6 per-call describe-program calls
+        assertEquals(6, describeProgramCalls, "describe-program should be called per (module, candidate) pair")
+        // 2 modules × 3 candidates = 6 per-call describe-module calls
+        assertEquals(6, describeModuleCalls, "describe-module should be called per (module, candidate) pair")
+    }
+
+    @Test
+    fun testUserProvidedDescriptionsSkipLLMEvenPerCall() = runBlocking {
+        val calls = mutableListOf<String>()
+        val executor = createMockExecutor(trackCalls = calls)
+        val proposer = InstructionProposer.create(
+            strategy = twoNodeStrategy, // has node descriptions
+            trainset = trainset,
+            promptExecutor = executor,
+            llModel = llModel,
+            programDescription = "User-provided description", // skips describe-program
+        )
+
+        proposer.proposeInstructionsForProgram(demoCandidates = null, numCandidates = 3)
+
+        assertFalse("describe-program" in calls, "User-provided programDescription should skip describe-program per-call")
+        assertFalse("describe-module" in calls, "User-provided node descriptions should skip describe-module per-call")
+    }
+
+    // ---- Gap 5: programExample in describeModulePrompt ----
+
+    @Test
+    fun testDescribeModulePromptContainsProgramExample() = runBlocking {
+        val capturedPrompts = mutableListOf<Pair<String, String>>()
+        val executor = createPromptCapturingExecutor(capturedPrompts)
+        val proposer = InstructionProposer.create(
+            strategy = noDescriptionStrategy,
+            trainset = trainset,
+            promptExecutor = executor,
+            llModel = llModel,
+        )
+
+        proposer.proposeInstructionsForProgram(demoCandidates = null, numCandidates = 1)
+
+        // Find describe-module prompts
+        val describeModulePrompts = capturedPrompts.filter { (sys, _) ->
+            "describe the role of the specified module" in sys
+        }
+
+        assertTrue(describeModulePrompts.isNotEmpty(), "Should have describe-module prompts")
+
+        for ((_, userContent) in describeModulePrompts) {
+            assertTrue(
+                "EXAMPLE OF PROGRAM IN USE:" in userContent,
+                "describe-module prompt should contain EXAMPLE OF PROGRAM IN USE: section"
+            )
+        }
     }
 }

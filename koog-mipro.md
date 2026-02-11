@@ -35,7 +35,7 @@ Support automatic prompt optimization (MIPRO v2) within Koog's agent framework. 
 | `AgentModule` | `OptimizableNode<TInput, TOutput>` (subclass of `AIAgentNode`) |
 | `Signature.instruction` | `OptimizableNode.instruction: String` |
 | `Trace` | `Demonstration<TInput, TOutput>` (labeled = from training data, bootstrapped = from teacher execution) |
-| `Example` | `Example(data: Map<String, Any>, labelKey)` |
+| `Example` | `Example<TInput, TOutput>(input: TInput, label: TOutput?)` |
 | `Optimizer` | Standalone classes (`LabeledFewShot`, `BootstrapFewShot`) returning `OptimizationResult` |
 
 ### OptimizableNode
@@ -168,11 +168,12 @@ There is no shared optimizer interface — each optimizer has its own `optimize(
 ### Example and Metric Types
 
 ```kotlin
-// Training data — values can be any type matching node I/O
-data class Example(
-    val data: Map<String, Any>,
-    val labelKey: String? = null,
+// Training data — typed input and optional label
+data class Example<TInput, TOutput>(
+    val input: TInput,
+    val label: TOutput? = null,
 )
+typealias Dataset<TInput, TOutput> = List<Example<TInput, TOutput>>
 
 // Typed metric — T matches the strategy's output type
 typealias Metric<T> = (expected: T, actual: T) -> Double
@@ -291,8 +292,8 @@ agents/agents-core/src/commonMain/kotlin/ai/koog/agents/core/
     ├── core/
     │   ├── Demonstration.kt                 # DONE: Typed input-output pair
     │   ├── OptimizationConfig.kt            # DONE: Coroutine context element for trial configs
-    │   ├── StrategyOptimizer.kt             # DONE: OptimizationResult data class
-    │   └── Example.kt                       # DONE: Training data type (Map<String, Any>) + Metric<T>
+    │   ├── OptimizationResult.kt            # DONE: OptimizationResult data class
+    │   └── Example.kt                       # DONE: Example<TInput, TOutput> + Metric<T> + Dataset<TInput, TOutput>
     │
     ├── features/
     │   └── TraceCollectionFeature.kt        # DONE: Pipeline feature for capturing node I/O
@@ -304,20 +305,24 @@ agents/agents-core/src/commonMain/kotlin/ai/koog/agents/core/
     │   ├── LabeledFewShot.kt                # DONE: Samples labeled examples as demonstrations
     │   ├── BootstrapFewShot.kt              # DONE: Bootstraps demos via teacher agent execution
     │   └── mipro/
-    │       ├── MIPROv2Optimizer.kt           # TODO
-    │       ├── DemoSetGenerator.kt           # TODO
-    │       ├── InstructionProposer.kt        # TODO
-    │       └── ConfigurationSearch.kt        # TODO
+    │       ├── MIPROv2.kt                   # DONE: MIPROv2 orchestrator (AutoRunMode, MIPROv2Config, random grid search)
+    │       ├── DemoSetGenerator.kt          # DONE: generateDemoSets() — N diverse candidate sets per node
+    │       ├── InstructionProposer.kt       # DONE: LLM-based instruction candidate generation
+    │       ├── InstructionProposalPrompts.kt # DONE: Prompt builders for instruction proposal
+    │       └── DatasetSummarizer.kt         # DONE: Iterative dataset summary generation
     │
     └── util/
         ├── StrategyUtils.kt                 # DONE: findOptimizableModules(), validateOptimizationConfig(), etc.
         ├── OptimizationResultUtils.kt       # DONE: OptimizationResult.toAgent() extension
-        └── Evaluation.kt                    # TODO: Metric evaluation helpers
+        └── sampleLabeledDemonstrations.kt   # DONE: Sampling utility for labeled demos
 
 agents/agents-core/src/jvmTest/kotlin/ai/koog/agents/core/optimization/
 ├── OptimizationInfrastructureTest.kt        # DONE: Tests for infrastructure + OptimizableNode DSL
 ├── BootstrapFewShotTest.kt                  # DONE: Tests for BootstrapFewShot optimizer
-└── BootstrapFewShotTestRegression.kt        # DONE: Regression test for demo leakage prevention
+├── BootstrapFewShotLeakageTest.kt           # DONE: Regression test for demo leakage prevention
+├── InstructionProposerTest.kt               # DONE: Tests for InstructionProposer
+├── DemoSetGeneratorTest.kt                  # DONE: Tests for demo set generation
+└── MIPROv2Test.kt                           # DONE: End-to-end tests for MIPROv2 pipeline
 ```
 
 No Koog core files are modified — `AIAgentNode`, `AIAgentNodeDelegate`, and `AIAgentSubgraphBuilder` are untouched.
@@ -334,22 +339,32 @@ No Koog core files are modified — `AIAgentNode`, `AIAgentNodeDelegate`, and `A
 - [x] `TraceCollectionFeature` with `collectTraces {}` DSL
 - [x] Context helpers (`getNodeInstruction`, `getNodeDemonstrations`, etc.)
 - [x] `OptimizationResult` data class
-- [x] `Example` (with `Map<String, Any>`) and `Metric<T>` types
+- [x] `Example<TInput, TOutput>` (typed input + optional label) and `Metric<T>` types
 - [x] Strategy utilities (`findOptimizableModules`, `validateOptimizationConfig`, `describeForOptimization`)
 - [x] `LabeledFewShot` optimizer
 - [x] Infrastructure tests (`OptimizationInfrastructureTest`)
 - [x] `BootstrapFewShot` optimizer (takes components, builds per-example teacher agent)
 - [x] `OptimizationResult.toAgent()` extension for creating optimized agent copies
-- [x] `BootstrapFewShotTest` (13 tests)
+- [x] `BootstrapFewShotTest` (7 tests)
 - [x] BootstrapFewShot demo leakage prevention (filter current example's demos from teacher prompt)
-- [x] `BootstrapFewShotTestRegression` (2 tests)
+- [x] `BootstrapFewShotLeakageTest` (2 tests)
+- [x] `InstructionProposer` — LLM-based instruction candidate generation with dataset summary, program description, tips
+- [x] `InstructionProposalPrompts` — prompt builders for dataset descriptor, observation summarizer, instruction generation
+- [x] `DatasetSummarizer` — iterative dataset summary via LLM observation refinement
+- [x] `InstructionProposerTest` (24 tests)
+- [x] `DemoSetGenerator` — `generateDemoSets()` producing N diverse candidate demo sets per node (zero-shot, labeled-only, unshuffled bootstrap, shuffled bootstraps)
+- [x] `MIPROv2` orchestrator — `AutoRunMode`, `MIPROv2Config`, 3-step pipeline (demo generation → instruction proposal → random grid search)
+- [x] `DemoSetGeneratorTest` (7 tests)
+- [x] `MIPROv2Test` (7 tests — end-to-end, manual config, config validation, metadata, zero-shot, valset split)
 
 ### TODO
-- [ ] Port MIPRO v2 (`DemoSetGenerator`, `InstructionProposer`, `ConfigurationSearch`, `MIPROv2Optimizer`)
 - [ ] Bake-in mechanism: apply `OptimizationConfig` as node defaults for deployment without coroutine context
-- [ ] Metric evaluation helpers
-- [ ] End-to-end integration tests (with mocked LLM)
-- [ ] Port heart disease example
+- [ ] Bayesian optimization (TPE) as alternative to random grid search in Step 3
+- [ ] End-to-end integration tests with real LLM
+
+### Done (recent)
+- [x] Port heart disease example — end-to-end experiment in `koog-auto-agent-optimization` (mod-koog branch) using Koog's native optimization API with 2 typed `OptimizableNode`s: 1 trainee (`PatientData → TraineeOpinion`) looping 3x via `onCondition`/`transformed` edges + 1 vote (`VoteInput → Verdict`) with structured output, parallel evaluation, throttled executor
+- [x] Progress logging in library code — `BootstrapFewShot`, `DemoSetGenerator`, `InstructionProposer`, `MIPROv2` all log step transitions, per-example/trial progress, and running scores via `KotlinLogging` (no external progressbar dependency)
 
 ## Applying Optimization Results
 

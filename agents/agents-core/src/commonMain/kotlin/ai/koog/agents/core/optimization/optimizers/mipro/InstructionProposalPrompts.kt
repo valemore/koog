@@ -1,6 +1,5 @@
 package ai.koog.agents.core.optimization.optimizers.mipro
 
-import ai.koog.agents.core.optimization.core.Example
 import ai.koog.prompt.dsl.Prompt
 import ai.koog.prompt.dsl.prompt
 
@@ -15,12 +14,11 @@ import ai.koog.prompt.dsl.prompt
  */
 
 /**
- * Formats a batch of examples for display to the LLM.
+ * Formats a batch of pre-rendered example strings for display to the LLM.
  */
-internal fun formatExampleBatch(examples: List<Example>): String {
+internal fun formatExampleBatch(examples: List<String>): String {
     return examples.mapIndexed { index, example ->
-        val fields = example.data.entries.joinToString(", ") { (k, v) -> "$k=$v" }
-        "Example ${index + 1}: {$fields}"
+        "Example ${index + 1}: $example"
     }.joinToString("\n")
 }
 
@@ -29,7 +27,7 @@ internal fun formatExampleBatch(examples: List<Example>): String {
  *
  * Corresponds to dspy's DatasetDescriptor signature.
  */
-internal fun datasetDescriptorPrompt(exampleBatch: List<Example>): Prompt = prompt("dataset-descriptor") {
+internal fun datasetDescriptorPrompt(exampleBatch: List<String>): Prompt = prompt("dataset-descriptor") {
     system(
         """Given several examples from a dataset please write observations about trends that hold for most or all of the samples.
 Some areas you may consider in your observations: topics, content, syntax, conciseness, etc.
@@ -49,7 +47,7 @@ Please write your observations about trends that hold for most or all of the sam
  * Corresponds to dspy's DatasetDescriptorWithPriorObservations signature.
  */
 internal fun datasetDescriptorWithPriorObservationsPrompt(
-    exampleBatch: List<Example>,
+    exampleBatch: List<String>,
     priorObservations: String
 ): Prompt = prompt("dataset-descriptor-with-prior") {
     system(
@@ -123,6 +121,7 @@ Please describe what this program does and how it works."""
 internal fun describeModulePrompt(
     programCode: String,
     programDescription: String,
+    programExample: String,
     moduleCode: String,
 ): Prompt = prompt("describe-module") {
     system(
@@ -136,6 +135,9 @@ $programCode
 PROGRAM DESCRIPTION:
 $programDescription
 
+EXAMPLE OF PROGRAM IN USE:
+$programExample
+
 MODULE:
 $moduleCode
 
@@ -148,10 +150,12 @@ Please describe this module's role in the program."""
  */
 internal data class GenerateInstructionPromptConfig(
     val datasetSummary: String?,
+    val programCode: String?,
     val programDescription: String?,
     val moduleCodeString: String,
     val moduleDescription: String?,
     val taskDemos: String,
+    val previousInstructions: String?,
     val basicInstruction: String,
     val tip: String?,
 )
@@ -175,13 +179,19 @@ internal fun generateModuleInstructionPrompt(config: GenerateInstructionPromptCo
                 appendLine()
             }
 
+            if (config.programCode != null) {
+                appendLine("PROGRAM CODE:")
+                appendLine(config.programCode)
+                appendLine()
+            }
+
             if (config.programDescription != null) {
-                appendLine("PROGRAM STRUCTURE:")
+                appendLine("PROGRAM DESCRIPTION:")
                 appendLine(config.programDescription)
                 appendLine()
             }
 
-            appendLine("MODULE TO OPTIMIZE:")
+            appendLine("MODULE:")
             appendLine(config.moduleCodeString)
             appendLine()
 
@@ -194,6 +204,12 @@ internal fun generateModuleInstructionPrompt(config: GenerateInstructionPromptCo
             appendLine("TASK DEMO(S):")
             appendLine(config.taskDemos)
             appendLine()
+
+            if (config.previousInstructions != null && config.previousInstructions.isNotBlank()) {
+                appendLine("PREVIOUS INSTRUCTIONS:")
+                appendLine(config.previousInstructions)
+                appendLine()
+            }
 
             appendLine("BASIC INSTRUCTION:")
             appendLine(config.basicInstruction)
