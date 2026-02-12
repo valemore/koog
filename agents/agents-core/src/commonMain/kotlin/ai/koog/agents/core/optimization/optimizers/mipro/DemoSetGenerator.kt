@@ -6,7 +6,7 @@ import ai.koog.agents.core.optimization.core.Dataset
 import ai.koog.agents.core.optimization.core.Demonstration
 import ai.koog.agents.core.optimization.core.Metric
 import ai.koog.agents.core.optimization.optimizers.BootstrapFewShot
-import ai.koog.agents.core.optimization.optimizers.utils.findOptimizableModules
+import ai.koog.agents.core.optimization.optimizers.utils.findOptimizableNodes
 import ai.koog.agents.core.optimization.optimizers.utils.sampleLabeledDemonstrations
 import ai.koog.agents.core.tools.ToolRegistry
 import ai.koog.prompt.executor.model.PromptExecutor
@@ -83,7 +83,7 @@ public suspend fun <TInput, TOutput> generateDemoSets(
         return null
     }
 
-    val modules = strategy.findOptimizableModules()
+    val modules = strategy.findOptimizableNodes()
     if (modules.isEmpty()) return null
 
     // Output map: node name → mutable list of demo sets
@@ -131,7 +131,7 @@ public suspend fun <TInput, TOutput> generateDemoSets(
     adjustedCount--
     val unshuffledOptimizer = BootstrapFewShot(
         maxBootstrappedDemos = maxBootstrappedDemos,
-        maxLabeledDemos = maxLabeledDemos,
+        maxTotalDemos = maxLabeledDemos,
         maxRounds = maxRounds,
         maxErrors = maxErrors,
         metricThreshold = 1.0, // doesn't matter since metric is null
@@ -150,12 +150,13 @@ public suspend fun <TInput, TOutput> generateDemoSets(
     // 4. Shuffled bootstraps: fill remaining slots with shuffled trainset + random demo count
     val shuffledTotal = maxOf(0, adjustedCount)
 
-    // Pre-generate seeds and per-iteration random values from parent random for determinism
-    data class ShuffledBootstrapParams(val seed: Long, val numDemos: Int)
-    val shuffledParams = (0 until shuffledTotal).map {
-        ShuffledBootstrapParams(
-            seed = random.nextLong(),
-            numDemos = random.nextInt(1, maxBootstrappedDemos + 1),
+        val shuffledOptimizer = BootstrapFewShot(
+            maxBootstrappedDemos = numDemos,
+            maxTotalDemos = maxLabeledDemos,
+            maxRounds = maxRounds,
+            maxErrors = maxErrors,
+            metricThreshold = metricThreshold ?: 1.0,
+            random = random,
         )
     }
 
