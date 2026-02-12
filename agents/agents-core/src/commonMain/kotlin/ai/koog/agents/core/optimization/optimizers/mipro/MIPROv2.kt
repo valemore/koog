@@ -8,7 +8,7 @@ import ai.koog.agents.core.optimization.core.Demonstration
 import ai.koog.agents.core.optimization.core.Metric
 import ai.koog.agents.core.optimization.core.OptimizationConfig
 import ai.koog.agents.core.optimization.core.OptimizationResult
-import ai.koog.agents.core.optimization.util.findOptimizableModules
+import ai.koog.agents.core.optimization.optimizers.utils.findOptimizableModules
 import ai.koog.agents.core.tools.ToolRegistry
 import ai.koog.prompt.executor.model.PromptExecutor
 import ai.koog.prompt.llm.LLModel
@@ -115,6 +115,7 @@ public data class MIPROv2Config(
  *     createStrategy = { myStrategy },
  *     trainset = trainingExamples,
  *     metric = { expected, actual -> if (expected == actual) 1.0 else 0.0 },
+ *     inputFromExample = { it.data["question"] as String },
  * )
  *
  * val optimizedAgent = result.toAgent(originalAgent)

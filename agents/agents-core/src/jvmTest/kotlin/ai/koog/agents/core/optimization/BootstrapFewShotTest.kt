@@ -8,8 +8,9 @@ import ai.koog.agents.core.optimization.core.Demonstration
 import ai.koog.agents.core.optimization.core.Example
 import ai.koog.agents.core.optimization.core.Metric
 import ai.koog.agents.core.optimization.core.OptimizationResult
+import ai.koog.agents.core.optimization.core.optimizableNode
+import ai.koog.agents.core.optimization.core.toAgent
 import ai.koog.agents.core.optimization.optimizers.BootstrapFewShot
-import ai.koog.agents.core.optimization.util.toAgent
 import ai.koog.agents.core.tools.ToolRegistry
 import ai.koog.agents.testing.tools.getMockExecutor
 import ai.koog.agents.core.tools.ToolDescriptor
@@ -85,6 +86,7 @@ class BootstrapFewShotTest {
             strategy = simpleStrategy,
             trainset = trainset,
             metric = exactMatch,
+            inputFromExample = { it.data["question"] as String },
         )
     }
 
@@ -92,7 +94,7 @@ class BootstrapFewShotTest {
      * Runs the optimized agent and returns the captured prompts.
      * The prompts are in execution order: first the thinking node's prompt, then the answer node's.
      *
-     * Each prompt has the structure (from [defaultStringPromptFn]):
+     * Each prompt has the structure (from [ai.koog.agents.core.optimization.core.defaultStringPromptFn]):
      *   messages[0] = system(instruction)
      *   messages[1..2*N] = N demo pairs: user(demo.input), assistant(demo.output)
      *   messages[last] = user(actualInput)

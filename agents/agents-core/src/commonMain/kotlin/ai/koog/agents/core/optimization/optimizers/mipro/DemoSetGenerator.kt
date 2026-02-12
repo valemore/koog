@@ -6,8 +6,8 @@ import ai.koog.agents.core.optimization.core.Dataset
 import ai.koog.agents.core.optimization.core.Demonstration
 import ai.koog.agents.core.optimization.core.Metric
 import ai.koog.agents.core.optimization.optimizers.BootstrapFewShot
-import ai.koog.agents.core.optimization.util.findOptimizableModules
-import ai.koog.agents.core.optimization.util.sampleLabeledDemonstrations
+import ai.koog.agents.core.optimization.optimizers.utils.findOptimizableModules
+import ai.koog.agents.core.optimization.optimizers.utils.sampleLabeledDemonstrations
 import ai.koog.agents.core.tools.ToolRegistry
 import ai.koog.prompt.executor.model.PromptExecutor
 import io.github.oshai.kotlinlogging.KotlinLogging
@@ -119,7 +119,6 @@ public suspend fun <TInput, TOutput> generateDemoSets(
         for (module in modules) {
             val labeled = sampleLabeledDemonstrations(
                 module.demonstrations,
-                sample = true,
                 k = maxLabeledDemos,
                 random = random
             )

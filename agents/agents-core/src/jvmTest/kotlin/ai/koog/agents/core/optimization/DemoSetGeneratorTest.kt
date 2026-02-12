@@ -6,6 +6,7 @@ import ai.koog.agents.core.dsl.builder.strategy
 import ai.koog.agents.core.optimization.core.Demonstration
 import ai.koog.agents.core.optimization.core.Example
 import ai.koog.agents.core.optimization.core.Metric
+import ai.koog.agents.core.optimization.core.optimizableNode
 import ai.koog.agents.core.optimization.optimizers.mipro.generateDemoSets
 import ai.koog.agents.testing.tools.getMockExecutor
 import ai.koog.prompt.dsl.Prompt
@@ -69,6 +70,7 @@ class DemoSetGeneratorTest {
             metric = exactMatch,
             metricThreshold = 1.0,
             maxErrors = null,
+            inputFromExample = { it.data["question"] as String },
         )
 
         assertNull(result, "Zero-shot mode should return null")
@@ -89,6 +91,7 @@ class DemoSetGeneratorTest {
             metric = exactMatch,
             metricThreshold = 1.0,
             maxErrors = null,
+            inputFromExample = { it.data["question"] as String },
         )
 
         assertNotNull(result, "Result should not be null")
@@ -113,6 +116,7 @@ class DemoSetGeneratorTest {
             metricThreshold = 1.0,
             maxErrors = null,
             includeNonBootstrapped = true,
+            inputFromExample = { it.data["question"] as String },
         )
 
         assertNotNull(result)
@@ -138,6 +142,7 @@ class DemoSetGeneratorTest {
             metricThreshold = 1.0,
             maxErrors = null,
             includeNonBootstrapped = true,
+            inputFromExample = { it.data["question"] as String },
         )
 
         assertNotNull(result)
@@ -168,6 +173,7 @@ class DemoSetGeneratorTest {
             metricThreshold = 1.0,
             maxErrors = null,
             includeNonBootstrapped = true,
+            inputFromExample = { it.data["question"] as String },
         )
 
         assertNotNull(result)
@@ -196,6 +202,7 @@ class DemoSetGeneratorTest {
             metric = exactMatch,
             metricThreshold = 1.0,
             maxErrors = null,
+            inputFromExample = { it.data["question"] as String },
         )
 
         assertNotNull(result)
@@ -221,6 +228,7 @@ class DemoSetGeneratorTest {
             metricThreshold = 1.0,
             maxErrors = null,
             includeNonBootstrapped = false,
+            inputFromExample = { it.data["question"] as String },
         )
 
         assertNotNull(result)

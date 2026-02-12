@@ -6,6 +6,7 @@ import ai.koog.agents.core.dsl.builder.strategy
 import ai.koog.agents.core.optimization.core.Demonstration
 import ai.koog.agents.core.optimization.core.Example
 import ai.koog.agents.core.optimization.core.Metric
+import ai.koog.agents.core.optimization.core.optimizableNode
 import ai.koog.agents.core.optimization.optimizers.mipro.AutoRunMode
 import ai.koog.agents.core.optimization.optimizers.mipro.MIPROv2
 import ai.koog.agents.core.optimization.optimizers.mipro.MIPROv2Config
@@ -108,6 +109,7 @@ class MIPROv2Test {
             createStrategy = { simpleStrategy },
             trainset = trainset,
             metric = exactMatch,
+            inputFromExample = { it.data["question"] as String },
             valset = valset,
         )
 
@@ -144,6 +146,7 @@ class MIPROv2Test {
             createStrategy = { simpleStrategy },
             trainset = trainset,
             metric = exactMatch,
+            inputFromExample = { it.data["question"] as String },
             valset = valset,
         )
 
@@ -202,6 +205,7 @@ class MIPROv2Test {
                 createStrategy = { simpleStrategy },
                 trainset = trainset,
                 metric = exactMatch,
+                inputFromExample = { it.data["question"] as String },
                 valset = valset,
             )
         }
@@ -233,6 +237,7 @@ class MIPROv2Test {
             createStrategy = { simpleStrategy },
             trainset = trainset,
             metric = exactMatch,
+            inputFromExample = { it.data["question"] as String },
             valset = valset,
         )
 
@@ -270,6 +275,7 @@ class MIPROv2Test {
             createStrategy = { simpleStrategy },
             trainset = trainset,
             metric = exactMatch,
+            inputFromExample = { it.data["question"] as String },
             valset = valset,
         )
 
@@ -307,6 +313,7 @@ class MIPROv2Test {
             createStrategy = { simpleStrategy },
             trainset = trainset,
             metric = exactMatch,
+            inputFromExample = { it.data["question"] as String },
             valset = null,
         )
 

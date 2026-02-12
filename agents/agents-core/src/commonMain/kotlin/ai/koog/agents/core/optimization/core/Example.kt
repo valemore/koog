@@ -3,9 +3,9 @@ package ai.koog.agents.core.optimization.core
 /**
  * Training or validation data for prompt optimization.
  *
- * An example pairs a typed input with an optional typed label (expected output).
- * The type parameters are tied to the strategy's input and output types,
- * giving compile-time safety throughout the optimization pipeline.
+ * An example consists of a map of mapping data field keys (node names) to data field values (node outputs).
+ * When generating few-shot examples, the example for the node specified by the field key is converted to a few-shot example.
+ * The field values can be any type, strings, data classes, enums, etc., matching whatever the corresponding [OptimizableNode][OptimizableNode]
  *
  * @param TInput The type of the input (matches the strategy's input type).
  * @param TOutput The type of the expected output/label (matches the strategy's output type).
@@ -17,25 +17,29 @@ public data class Example<TInput, TOutput>(
     val label: TOutput? = null,
 ) {
     /**
+     * Gets the label (expected output) value.
+     *
+     * @return The label value.
+     * @throws IllegalStateException if [labelKey] is null or not present in [data].
+     */
+    public val label: Any
+        get() = labelKey?.let { data[it] }
+            ?: error("Example has no labelKey set. Check hasLabel before accessing label.")
+
+    /**
+     * Gets the label (expected output) value, or null if unavailable.
+     *
+     * @return The label value, or null if [labelKey] is null or not present in [data].
+     */
+    public val labelOrNull: Any?
+        get() = labelKey?.let { data[it] }
+
+    /**
      * Checks if this example has a label.
      */
     public val hasLabel: Boolean
         get() = label != null
 }
-
-/**
- * A metric function that scores how well an actual output matches an expected output.
- *
- * Metrics are used during optimization to evaluate candidate configurations. For example, they may
- * return a score between 0.0 (no match) and 1.0 (perfect match), though other ranges are
- * acceptable depending on the optimization algorithm.
- *
- * The type parameter [T] is tied to the strategy's output type, giving compile-time safety
- * that the metric matches the pipeline being optimized.
- *
- * @param T The type of the values being compared (matches the strategy's output type).
- */
-public typealias Metric<T> = (expected: T, actual: T) -> Double
 
 /**
  * Type alias for a dataset (list of examples).
