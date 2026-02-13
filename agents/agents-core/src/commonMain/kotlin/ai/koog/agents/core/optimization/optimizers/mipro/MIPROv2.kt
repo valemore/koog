@@ -112,7 +112,7 @@ public data class MIPROv2Config(
  * val result = mipro.optimize(
  *     promptExecutor = executor,
  *     agentConfig = agentConfig,
- *     createStrategy = { myStrategy },
+ *     strategy = myStrategy,
  *     trainset = trainingExamples,
  *     metric = { expected, actual -> if (expected == actual) 1.0 else 0.0 },
  *     inputFromExample = { it.data["question"] as String },
@@ -152,7 +152,7 @@ public class MIPROv2(private val config: MIPROv2Config) {
      * @param valset Optional validation set. If null, split from [trainset].
      * @param toolRegistry Tools available to the agent.
      * @param describeInput Renders an input value as a human-readable string for dataset
-     *  summarization. Defaults to [toString].
+     *  summarization. When null (default), uses JSON serialization with toString fallback.
      * @return The best [OptimizationResult] found during search.
      */
     public suspend fun <TInput, TOutput> optimize(
@@ -163,7 +163,7 @@ public class MIPROv2(private val config: MIPROv2Config) {
         metric: Metric<TOutput>,
         valset: Dataset<TInput, TOutput>? = null,
         toolRegistry: ToolRegistry = ToolRegistry.EMPTY,
-        describeInput: (TInput) -> String = { it.toString() },
+        describeInput: ((TInput) -> String)? = null,
     ): OptimizationResult {
         val random = Random(config.seed)
         // Create one strategy upfront for inspection (node discovery, descriptions, etc.)
@@ -213,7 +213,7 @@ public class MIPROv2(private val config: MIPROv2Config) {
             llModel = config.promptModel,
             config = config.proposerConfig,
             random = random,
-            describeInput = describeInput,
+            describeInput = describeInput ?: { serializeOrToString(it, strategy.inputType) },
         )
         val instructionCandidates = proposer.proposeInstructionsForProgram(
             demoCandidates = demoCandidates,
@@ -240,6 +240,33 @@ public class MIPROv2(private val config: MIPROv2Config) {
             random = random,
         )
     }
+
+    /**
+     * Convenience overload that accepts a strategy instance directly.
+     *
+     * Equivalent to `optimize(createStrategy = { strategy }, ...)`. Use the [createStrategy]
+     * overload instead when [MIPROv2Config.parallelism] > 1 and the strategy holds mutable
+     * closure state that must be isolated per evaluation.
+     */
+    public suspend fun <TInput, TOutput> optimize(
+        promptExecutor: PromptExecutor,
+        agentConfig: AIAgentConfig,
+        strategy: AIAgentGraphStrategy<TInput, TOutput>,
+        trainset: Dataset<TInput, TOutput>,
+        metric: Metric<TOutput>,
+        valset: Dataset<TInput, TOutput>? = null,
+        toolRegistry: ToolRegistry = ToolRegistry.EMPTY,
+        describeInput: ((TInput) -> String)? = null,
+    ): OptimizationResult = optimize(
+        promptExecutor = promptExecutor,
+        agentConfig = agentConfig,
+        createStrategy = { strategy },
+        trainset = trainset,
+        metric = metric,
+        valset = valset,
+        toolRegistry = toolRegistry,
+        describeInput = describeInput,
+    )
 
     /**
      * Step 3: Random grid search over instruction/demo combinations.

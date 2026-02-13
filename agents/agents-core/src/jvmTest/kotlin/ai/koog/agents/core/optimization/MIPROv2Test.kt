@@ -106,7 +106,7 @@ class MIPROv2Test {
         val result = mipro.optimize(
             promptExecutor = executor,
             agentConfig = agentConfig,
-            createStrategy = { simpleStrategy },
+            strategy = simpleStrategy,
             trainset = trainset,
             metric = exactMatch,
             inputFromExample = { it.data["question"] as String },
@@ -143,7 +143,7 @@ class MIPROv2Test {
         val result = mipro.optimize(
             promptExecutor = executor,
             agentConfig = agentConfig,
-            createStrategy = { simpleStrategy },
+            strategy = simpleStrategy,
             trainset = trainset,
             metric = exactMatch,
             inputFromExample = { it.data["question"] as String },
@@ -202,7 +202,7 @@ class MIPROv2Test {
             mipro.optimize(
                 promptExecutor = executor,
                 agentConfig = agentConfig,
-                createStrategy = { simpleStrategy },
+                strategy = simpleStrategy,
                 trainset = trainset,
                 metric = exactMatch,
                 inputFromExample = { it.data["question"] as String },
@@ -234,7 +234,7 @@ class MIPROv2Test {
         val result = mipro.optimize(
             promptExecutor = executor,
             agentConfig = agentConfig,
-            createStrategy = { simpleStrategy },
+            strategy = simpleStrategy,
             trainset = trainset,
             metric = exactMatch,
             inputFromExample = { it.data["question"] as String },
@@ -272,7 +272,7 @@ class MIPROv2Test {
         val result = mipro.optimize(
             promptExecutor = executor,
             agentConfig = agentConfig,
-            createStrategy = { simpleStrategy },
+            strategy = simpleStrategy,
             trainset = trainset,
             metric = exactMatch,
             inputFromExample = { it.data["question"] as String },
@@ -310,7 +310,7 @@ class MIPROv2Test {
         val result = mipro.optimize(
             promptExecutor = executor,
             agentConfig = agentConfig,
-            createStrategy = { simpleStrategy },
+            strategy = simpleStrategy,
             trainset = trainset,
             metric = exactMatch,
             inputFromExample = { it.data["question"] as String },
