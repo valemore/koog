@@ -150,13 +150,12 @@ public suspend fun <TInput, TOutput> generateDemoSets(
     // 4. Shuffled bootstraps: fill the remaining slots with shuffled trainset + random demo count
     val shuffledTotal = maxOf(0, adjustedCount)
 
-        val shuffledOptimizer = BootstrapFewShot(
-            maxBootstrappedDemos = numDemos,
-            maxTotalDemos = maxLabeledDemos,
-            maxRounds = maxRounds,
-            maxErrors = maxErrors,
-            metricThreshold = metricThreshold ?: 1.0,
-            random = random,
+    // Pre-generate seeds and per-iteration random values from parent random for determinism
+    data class ShuffledBootstrapParams(val seed: Long, val numDemos: Int)
+    val shuffledParams = (0 until shuffledTotal).map {
+        ShuffledBootstrapParams(
+            seed = random.nextLong(),
+            numDemos = random.nextInt(1, maxBootstrappedDemos + 1),
         )
     }
 
@@ -173,7 +172,7 @@ public suspend fun <TInput, TOutput> generateDemoSets(
 
                     val shuffledOptimizer = BootstrapFewShot(
                         maxBootstrappedDemos = params.numDemos,
-                        maxLabeledDemos = maxLabeledDemos,
+                        maxTotalDemos = maxLabeledDemos,
                         maxRounds = maxRounds,
                         maxErrors = maxErrors,
                         metricThreshold = metricThreshold ?: 1.0,

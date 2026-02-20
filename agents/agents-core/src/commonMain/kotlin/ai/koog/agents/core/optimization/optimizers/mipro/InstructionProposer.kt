@@ -6,7 +6,9 @@ import ai.koog.agents.core.optimization.core.Dataset
 import ai.koog.agents.core.optimization.core.Demonstration
 import ai.koog.agents.core.optimization.optimizers.utils.describeForOptimization
 import ai.koog.agents.core.optimization.optimizers.utils.executeAndExtract
+import ai.koog.agents.core.optimization.optimizers.utils.extractFieldDescriptionsFromType
 import ai.koog.agents.core.optimization.optimizers.utils.findOptimizableNodes
+import ai.koog.agents.core.optimization.optimizers.utils.serializeOrToString
 import ai.koog.prompt.executor.model.PromptExecutor
 import ai.koog.prompt.llm.LLModel
 import io.github.oshai.kotlinlogging.KotlinLogging
@@ -15,12 +17,9 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.serializer
 import kotlin.random.Random
 import kotlin.reflect.KClass
 import kotlin.reflect.KType
-import kotlin.reflect.typeOf
 
 private val logger = KotlinLogging.logger {}
 
@@ -59,6 +58,7 @@ public data class InstructionProposerConfig(
     val setTipRandomly: Boolean = true,
     val useInstructHistory: Boolean = false,
     val setHistoryRandomly: Boolean = false,
+    val includeFieldDescriptions: Boolean = true,
 )
 
 /**
@@ -103,7 +103,8 @@ public class InstructionProposer private constructor(
          * always skip LLM generation.
          *
          * @param describeInput Renders an input value as a human-readable string for dataset
-         *  summarization and example display. Defaults to [toString].
+         *  summarization and example display. Defaults to pretty-printed JSON serialization
+         *  with [toString] fallback for non-serializable types.
          */
         public suspend fun <TInput, TOutput> create(
             strategy: AIAgentGraphStrategy<*, *>,
@@ -228,7 +229,7 @@ public class InstructionProposer private constructor(
     ): String {
         val nodeName = node.name
         val moduleCodeString = buildModuleCodeString(nodeName, node)
-        val taskDemos = gatherTaskDemos(nodeName, demoCandidates, demoSetIndex)
+        val taskDemos = gatherTaskDemos(node, demoCandidates, demoSetIndex)
         val basicInstruction = node.instruction
 
         // Gap 4: Per-call program description
@@ -311,6 +312,22 @@ public class InstructionProposer private constructor(
         return buildString {
             appendLine("Module \"$moduleName\": $inputTypeName -> $outputTypeName")
             appendLine("Current instruction: \"${module.instruction}\"")
+            if (config.includeFieldDescriptions) {
+                val inputDescs = extractFieldDescriptionsFromType(module.inputType)
+                if (inputDescs.isNotEmpty()) {
+                    appendLine("Input fields:")
+                    inputDescs.forEach { (name, desc) ->
+                        appendLine("  - $name: $desc")
+                    }
+                }
+                val outputDescs = extractFieldDescriptionsFromType(module.outputType)
+                if (outputDescs.isNotEmpty()) {
+                    appendLine("Output fields:")
+                    outputDescs.forEach { (name, desc) ->
+                        appendLine("  - $name: $desc")
+                    }
+                }
+            }
         }
     }
 
@@ -320,7 +337,7 @@ public class InstructionProposer private constructor(
      * Prefers bootstrapped demonstrations over labeled-only ones.
      */
     private fun gatherTaskDemos(
-        moduleName: String,
+        node: OptimizableNode<*, *>,
         demoCandidates: Map<String, List<List<Demonstration<*, *>>>>?,
         demoSetIndex: Int,
     ): String {
@@ -328,7 +345,7 @@ public class InstructionProposer private constructor(
             return NO_TASK_DEMOS
         }
 
-        val moduleDemoCandidates = demoCandidates[moduleName]
+        val moduleDemoCandidates = demoCandidates[node.name]
         if (moduleDemoCandidates.isNullOrEmpty()) {
             return NO_TASK_DEMOS
         }
@@ -349,12 +366,12 @@ public class InstructionProposer private constructor(
         val examples = buildList {
             for (demo in allDemos) {
                 if (size >= limit) break
-                if (demo.isBootstrapped) add(formatDemonstrationAsExample(demo))
+                if (demo.isBootstrapped) add(formatDemonstrationAsExample(demo, node.inputType, node.outputType))
             }
             if (size < limit) {
                 for (demo in allDemos) {
                     if (size >= limit) break
-                    if (!demo.isBootstrapped) add(formatDemonstrationAsExample(demo))
+                    if (!demo.isBootstrapped) add(formatDemonstrationAsExample(demo, node.inputType, node.outputType))
                 }
             }
         }
@@ -367,8 +384,8 @@ public class InstructionProposer private constructor(
     }
 
     /**
-     * Format a [Demonstration] as a string example for the LLM, using JSON serialization
-     * when available for consistency with runtime prompt formatting.
+     * Format a [Demonstration] as a string example for the LLM.
+     * Uses pretty-printed JSON serialization with [toString] fallback.
      */
     private fun formatDemonstrationAsExample(
         demo: Demonstration<*, *>,

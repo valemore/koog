@@ -67,7 +67,6 @@ private sealed class BootstrapOutcome {
  *     strategy = myStrategy,
  *     trainset = trainingExamples,
  *     metric = { expected, actual -> if (expected == actual) 1.0 else 0.0 },
- *     inputFromExample = { example -> example.data["question"] as String },
  * )
  *
  * // Option 1: Use the result config via coroutine context
@@ -111,7 +110,6 @@ public class BootstrapFewShot(
      * @param trainset Training examples to bootstrap from.
      * @param toolRegistry Tools available to the agent. Defaults to empty.
      * @param metric Optional metric to evaluate bootstrap quality. If null, all bootstraps are accepted.
-     * @param inputFromExample Maps an [Example] to the strategy's typed input.
      * @return The optimization result with bootstrapped and labeled demonstrations.
      */
     public suspend fun <TInput, TOutput> optimize(
@@ -192,7 +190,7 @@ public class BootstrapFewShot(
         strategy: AIAgentGraphStrategy<TInput, TOutput>,
         toolRegistry: ToolRegistry,
         nodes: List<OptimizableNode<*, *>>,
-        trainset: Dataset,
+        trainset: Dataset<TInput, TOutput>,
         baseConfig: OptimizationConfig,
         metric: Metric<TOutput>?,
     ): Pair<Map<String, MutableList<Demonstration<Any?, Any?>>>, List<Example<TInput, TOutput>>> {
@@ -266,7 +264,7 @@ public class BootstrapFewShot(
         strategy: AIAgentGraphStrategy<TInput, TOutput>,
         toolRegistry: ToolRegistry,
         nodes: List<OptimizableNode<*, *>>,
-        example: Example,
+        example: Example<TInput, TOutput>,
         baseConfig: OptimizationConfig,
         metric: Metric<TOutput>?,
     ): BootstrapOutcome {
@@ -295,7 +293,7 @@ public class BootstrapFewShot(
         // which is represented in the labeled demonstrations for a particular node,
         // we don't want the agent to see it, so we filter it out.
         val filteredDemos = baseConfig.demonstrations.mapValues { (_, demos) ->
-            demos.filterNot { it.input in exampleValues && it.output in exampleValues }
+            demos.filterNot { demo -> demo.input == example.input }
         }
         val filteredConfig = OptimizationConfig(
             instructions = baseConfig.instructions,
@@ -303,16 +301,15 @@ public class BootstrapFewShot(
         )
 
         // Run agent
-        val input = inputFromExample(example)
         val output = try {
-            withContext(filteredConfig) { tracingAgent.run(input) }
+            withContext(filteredConfig) { tracingAgent.run(example.input) }
         } catch (e: Exception) {
             return BootstrapOutcome.Failure.ExceptionRaised(e)
         }
 
         // Evaluate metric
-        if (metric != null && example.hasLabel) {
-            val expected = example.label!!
+        val expected = example.label
+        if (metric != null && expected != null) {
             val score = metric(expected, output)
             if (score < metricThreshold) {
                 return BootstrapOutcome.Failure.MetricNotPassed

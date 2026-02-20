@@ -109,7 +109,6 @@ class MIPROv2Test {
             strategy = simpleStrategy,
             trainset = trainset,
             metric = exactMatch,
-            inputFromExample = { it.data["question"] as String },
             valset = valset,
         )
 
@@ -146,7 +145,6 @@ class MIPROv2Test {
             strategy = simpleStrategy,
             trainset = trainset,
             metric = exactMatch,
-            inputFromExample = { it.data["question"] as String },
             valset = valset,
         )
 
@@ -205,7 +203,6 @@ class MIPROv2Test {
                 strategy = simpleStrategy,
                 trainset = trainset,
                 metric = exactMatch,
-                inputFromExample = { it.data["question"] as String },
                 valset = valset,
             )
         }
@@ -237,7 +234,6 @@ class MIPROv2Test {
             strategy = simpleStrategy,
             trainset = trainset,
             metric = exactMatch,
-            inputFromExample = { it.data["question"] as String },
             valset = valset,
         )
 
@@ -275,7 +271,6 @@ class MIPROv2Test {
             strategy = simpleStrategy,
             trainset = trainset,
             metric = exactMatch,
-            inputFromExample = { it.data["question"] as String },
             valset = valset,
         )
 
@@ -313,7 +308,6 @@ class MIPROv2Test {
             strategy = simpleStrategy,
             trainset = trainset,
             metric = exactMatch,
-            inputFromExample = { it.data["question"] as String },
             valset = null,
         )
 

@@ -70,7 +70,6 @@ class DemoSetGeneratorTest {
             metric = exactMatch,
             metricThreshold = 1.0,
             maxErrors = null,
-            inputFromExample = { it.data["question"] as String },
         )
 
         assertNull(result, "Zero-shot mode should return null")
@@ -91,7 +90,6 @@ class DemoSetGeneratorTest {
             metric = exactMatch,
             metricThreshold = 1.0,
             maxErrors = null,
-            inputFromExample = { it.data["question"] as String },
         )
 
         assertNotNull(result, "Result should not be null")
@@ -116,7 +114,6 @@ class DemoSetGeneratorTest {
             metricThreshold = 1.0,
             maxErrors = null,
             includeNonBootstrapped = true,
-            inputFromExample = { it.data["question"] as String },
         )
 
         assertNotNull(result)
@@ -142,7 +139,6 @@ class DemoSetGeneratorTest {
             metricThreshold = 1.0,
             maxErrors = null,
             includeNonBootstrapped = true,
-            inputFromExample = { it.data["question"] as String },
         )
 
         assertNotNull(result)
@@ -173,7 +169,6 @@ class DemoSetGeneratorTest {
             metricThreshold = 1.0,
             maxErrors = null,
             includeNonBootstrapped = true,
-            inputFromExample = { it.data["question"] as String },
         )
 
         assertNotNull(result)
@@ -202,7 +197,6 @@ class DemoSetGeneratorTest {
             metric = exactMatch,
             metricThreshold = 1.0,
             maxErrors = null,
-            inputFromExample = { it.data["question"] as String },
         )
 
         assertNotNull(result)
@@ -228,7 +222,6 @@ class DemoSetGeneratorTest {
             metricThreshold = 1.0,
             maxErrors = null,
             includeNonBootstrapped = false,
-            inputFromExample = { it.data["question"] as String },
         )
 
         assertNotNull(result)
