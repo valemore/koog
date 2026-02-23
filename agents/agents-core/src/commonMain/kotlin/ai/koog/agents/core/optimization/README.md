@@ -61,10 +61,9 @@ TODO
 What if our optimization space is not given in terms of instructions, demosntrations?
 Make it easy to e.g. optimize over model choice (perhaps even per-node)
 
-# BUG!!!
-We rely on optimizable node names / ids to be unique
-Check whether this is also true for vanilla Koog nodes
-Fix: Make optimizableNOde hashable and use that as key
+# Bugs
+ - We rely on optimizable node names / ids to be unique. Andreii confirmed this is also the case for vanilla Koog nodes and raised the issue with the Koog team in [this Slack thread](https://jetbrains.slack.com/archives/C07D31ARV1A/p1770727015702469)
+ - `findOptimizableNodes` will only return the first node in a Koog `parallel` block
 
 ## Input Output Fields (Removed)
 Provide labeled examples at the point of strategy constructions via the demonstrations field
