@@ -8,6 +8,8 @@ import ai.koog.agents.core.optimization.core.Demonstration
 import ai.koog.agents.core.optimization.core.Metric
 import ai.koog.agents.core.optimization.core.OptimizationConfig
 import ai.koog.agents.core.optimization.core.OptimizationResult
+import ai.koog.agents.core.optimization.optimizers.mipro.bayesian.TPEConfig
+import ai.koog.agents.core.optimization.optimizers.mipro.bayesian.bayesianSearch
 import ai.koog.agents.core.optimization.optimizers.utils.findOptimizableNodes
 import ai.koog.agents.core.optimization.optimizers.utils.serializeOrToString
 import ai.koog.agents.core.tools.ToolRegistry
@@ -44,6 +46,17 @@ public enum class AutoRunMode(public val numCandidates: Int, public val valSize:
 }
 
 /**
+ * Search strategy for Step 3 of [MIPROv2].
+ *
+ * - [RANDOM]: Uniform random grid search (original behavior).
+ * - [BAYESIAN]: TPE-based Bayesian optimization that learns from past trials.
+ */
+public enum class SearchStrategy {
+    RANDOM,
+    BAYESIAN,
+}
+
+/**
  * Configuration for the [MIPROv2] optimizer.
  *
  * Use [auto] for preset configurations, or set [numCandidates] and [numTrials]
@@ -65,6 +78,10 @@ public enum class AutoRunMode(public val numCandidates: Int, public val valSize:
  * @property parallelism Maximum concurrency for demo generation, instruction proposal, and
  *  evaluation during grid search. Set to 1 (default) for sequential execution; higher values
  *  require a [createStrategy][MIPROv2.optimize] factory that produces independent strategy instances.
+ * @property searchStrategy Strategy for Step 3 search: [SearchStrategy.RANDOM] for uniform random
+ *  grid search (default), or [SearchStrategy.BAYESIAN] for TPE-based Bayesian optimization.
+ * @property tpeConfig Configuration for the TPE sampler when [searchStrategy] is [SearchStrategy.BAYESIAN].
+ *  Ignored when [searchStrategy] is [SearchStrategy.RANDOM].
  */
 public data class MIPROv2Config(
     val promptModel: LLModel,
@@ -81,6 +98,8 @@ public data class MIPROv2Config(
     val minibatchFullEvalSteps: Int = 5,
     val proposerConfig: InstructionProposerConfig = InstructionProposerConfig(),
     val parallelism: Int = 1,
+    val searchStrategy: SearchStrategy = SearchStrategy.RANDOM,
+    val tpeConfig: TPEConfig = TPEConfig(),
 )
 
 /**
@@ -224,27 +243,67 @@ public class MIPROv2(private val config: MIPROv2Config) {
         // Discard demos if zero-shot mode
         val finalDemoCandidates = if (zeroShotMode) null else demoCandidates
 
-        // Step 3: Random grid search
-        logger.info { "=== MIPROv2 Step 3: Random grid search (${hyperParams.numTrials} trials) ===" }
-        return randomGridSearch(
-            promptExecutor = promptExecutor,
-            agentConfig = agentConfig,
-            createStrategy = createStrategy,
-            toolRegistry = toolRegistry,
-            instructionCandidates = instructionCandidates,
-            demoCandidates = finalDemoCandidates,
-            valSet = hyperParams.valSet,
-            numTrials = hyperParams.numTrials,
-            minibatch = hyperParams.minibatch,
-            metric = metric,
-            random = random,
-        )
+        // Step 3: Search for best configuration
+        return when (config.searchStrategy) {
+            SearchStrategy.RANDOM -> {
+                logger.info { "=== MIPROv2 Step 3: Random grid search (${hyperParams.numTrials} trials) ===" }
+                randomGridSearch(
+                    promptExecutor = promptExecutor,
+                    agentConfig = agentConfig,
+                    createStrategy = createStrategy,
+                    toolRegistry = toolRegistry,
+                    instructionCandidates = instructionCandidates,
+                    demoCandidates = finalDemoCandidates,
+                    valSet = hyperParams.valSet,
+                    numTrials = hyperParams.numTrials,
+                    minibatch = hyperParams.minibatch,
+                    metric = metric,
+                    random = random,
+                )
+            }
+
+            SearchStrategy.BAYESIAN -> {
+                logger.info { "=== MIPROv2 Step 3: Bayesian search / TPE (${hyperParams.numTrials} trials) ===" }
+                val inspectionStrategy = createStrategy()
+                val moduleNames = inspectionStrategy.findOptimizableNodes().map { it.name }
+                val defaultInstructions = inspectionStrategy.findOptimizableNodes().associate {
+                    it.name to it.instruction
+                }
+
+                bayesianSearch(
+                    moduleNames = moduleNames,
+                    instructionCandidates = instructionCandidates,
+                    demoCandidates = finalDemoCandidates,
+                    defaultInstructions = defaultInstructions,
+                    numTrials = hyperParams.numTrials,
+                    tpeConfig = config.tpeConfig,
+                    minibatch = hyperParams.minibatch,
+                    minibatchFullEvalSteps = config.minibatchFullEvalSteps,
+                    random = random,
+                ) { trialConfig, fullEval ->
+                    val evalSet = if (fullEval) {
+                        hyperParams.valSet
+                    } else {
+                        createMinibatch(hyperParams.valSet, config.minibatchSize, random)
+                    }
+                    evaluateConfig(
+                        config = trialConfig,
+                        promptExecutor = promptExecutor,
+                        agentConfig = agentConfig,
+                        createStrategy = createStrategy,
+                        toolRegistry = toolRegistry,
+                        dataset = evalSet,
+                        metric = metric,
+                    )
+                }
+            }
+        }
     }
 
     /**
      * Convenience overload that accepts a strategy instance directly.
      *
-     * Equivalent to `optimize(createStrategy = { strategy }, ...)`. Use the [createStrategy]
+     * Equivalent to `optimize(createStrategy = { strategy }, ...)`. Use the createStrategy
      * overload instead when [MIPROv2Config.parallelism] > 1 and the strategy holds mutable
      * closure state that must be isolated per evaluation.
      */
