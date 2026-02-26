@@ -316,11 +316,23 @@ public class BootstrapFewShot(
             }
         }
 
-        // Collect traces: for each node, select one trace
+        // Collect traces: for each node, select one trace.
+        // For passthrough nodes, the collected trace output equals the input (useless for demos).
+        // Replace it with the agent's final output so demos become (userQuery, agentFinalOutput).
         val traces = nodes.mapNotNull { node ->
             val nodeTraces = collectedTraces.getTracesForNode(node.name)
             if (nodeTraces.isEmpty()) return@mapNotNull null
-            node.name to selectTrace(nodeTraces, random)
+            val selectedTrace = selectTrace(nodeTraces, random)
+            val effectiveDemo = if (node.isPassthrough) {
+                Demonstration(
+                    input = selectedTrace.input,
+                    output = output as Any?,
+                    isBootstrapped = true,
+                )
+            } else {
+                selectedTrace
+            }
+            node.name to effectiveDemo
         }.toMap()
 
         return BootstrapOutcome.Success(traces)

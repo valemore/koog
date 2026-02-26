@@ -5,6 +5,8 @@ import ai.koog.agents.core.agent.entity.AIAgentNode
 import ai.koog.agents.core.agent.entity.AIAgentNodeBase
 import ai.koog.agents.core.dsl.builder.AIAgentSubgraphBuilderBase
 import ai.koog.prompt.dsl.Prompt
+import ai.koog.prompt.dsl.prompt
+import ai.koog.prompt.message.Message
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.serialization.serializer
 import kotlin.jvm.JvmName
@@ -62,12 +64,16 @@ import kotlin.reflect.typeOf
  * @property demonstrations Default demonstrations for few-shot prompting. May be overridden at
  *  runtime via [OptimizationConfig] in the coroutine context.
  * @property description Optional description for MIPRO program description.
+ * @property isPassthrough True if this node operates in passthrough mode (no LLM call).
+ *  Passthrough nodes inject instruction and demonstrations into the LLM session
+ *  without making their own LLM call, and return input unchanged. Use
+ *  [optimizablePromptNode] to create passthrough nodes.
  */
 public class OptimizableNode<TInput, TOutput> internal constructor(
     name: String,
     public val instruction: String,
     public val promptFn: OptimizableNodePromptBuildFn<TInput, TOutput>,
-    internal val executePrompt: suspend AIAgentGraphContextBase.(Prompt) -> TOutput,
+    internal val executePrompt: (suspend AIAgentGraphContextBase.(Prompt) -> TOutput)?,
     inputType: KType,
     outputType: KType,
     public val description: String? = null,
@@ -89,10 +95,37 @@ public class OptimizableNode<TInput, TOutput> internal constructor(
         val effectiveInstruction = config?.getInstruction(name) ?: instruction
         val effectiveDemos = config?.getTypedDemonstrations(name) ?: demonstrations
 
-        val builtPrompt = promptFn(effectiveInstruction, effectiveDemos, input)
-        executePrompt(builtPrompt)
+        if (executePrompt != null) {
+            // Normal mode: build prompt and execute LLM call
+            val builtPrompt = promptFn(effectiveInstruction, effectiveDemos, input)
+            executePrompt(builtPrompt)
+        } else {
+            // Passthrough mode: inject instruction + demos into LLM session, return input unchanged.
+            // The subsequent nodeLLMRequest will add the user message and make the LLM call.
+            llm.writeSession {
+                rewritePrompt { existingPrompt ->
+                    prompt(existingPrompt.id, existingPrompt.params) {
+                        system(effectiveInstruction)
+                        for (demo in effectiveDemos) {
+                            user(demo.input.toString())
+                            assistant(demo.output.toString())
+                        }
+                    }
+                }
+            }
+            @Suppress("UNCHECKED_CAST")
+            input as TOutput
+        }
     },
-)
+) {
+    /**
+     * True if this node operates in passthrough mode (no LLM call).
+     *
+     * Passthrough nodes inject instruction and demonstrations into the LLM session
+     * without making their own LLM call, and return input unchanged.
+     */
+    public val isPassthrough: Boolean get() = executePrompt == null
+}
 
 /**
  * Property delegate that creates an [OptimizableNode].
@@ -109,7 +142,7 @@ public class OptimizableNodeDelegate<TInput, TOutput>(
     private val description: String?,
     private val demonstrations: List<Demonstration<TInput, TOutput>>,
     private val promptFn: OptimizableNodePromptBuildFn<TInput, TOutput>,
-    private val executePrompt: suspend AIAgentGraphContextBase.(Prompt) -> TOutput,
+    private val executePrompt: (suspend AIAgentGraphContextBase.(Prompt) -> TOutput)?,
     private val inputType: KType,
     private val outputType: KType,
 ) {
@@ -228,6 +261,69 @@ public inline fun <reified TInput, reified TOutput> AIAgentSubgraphBuilderBase<*
         outputType = typeOf<TOutput>(),
     )
 }
+
+/**
+ * Creates a passthrough optimizable node that injects instruction and demonstrations into the
+ * LLM session without making its own LLM call.
+ *
+ * Use this for tool-using agents where the system prompt is the single optimizable parameter.
+ * The node sets up system(instruction) + demo user/assistant pairs in the session, then returns
+ * input unchanged. The subsequent [nodeLLMRequest][ai.koog.agents.core.dsl.extension.nodeLLMRequest]
+ * adds the user message and makes the actual LLM call.
+ *
+ * Example:
+ * ```kotlin
+ * val systemPrompt by optimizablePromptNode(
+ *     instruction = "You are a helpful weather assistant.",
+ * )
+ * val nodeCallLLM by nodeLLMRequestMultiple()
+ *
+ * edge(nodeStart forwardTo systemPrompt)
+ * edge(systemPrompt forwardTo nodeCallLLM)
+ * // ... tool loop edges
+ * ```
+ *
+ * @param instruction The base instruction (system prompt). May be overridden at runtime via
+ *  [OptimizationConfig].
+ * @param name Explicit node name. If null, derived from the delegated property name.
+ * @param description Optional description for MIPRO program description.
+ * @param demonstrations Default demonstrations for few-shot prompting. May be overridden at
+ *  runtime via [OptimizationConfig].
+ * @return An [OptimizableNodeDelegate] for use with Kotlin property delegation (`by`).
+ */
+@Suppress("UnusedReceiverParameter")
+public fun AIAgentSubgraphBuilderBase<*, *>.optimizablePromptNode(
+    instruction: String,
+    name: String? = null,
+    description: String? = null,
+    demonstrations: List<Demonstration<String, String>> = emptyList(),
+): OptimizableNodeDelegate<String, String> {
+    return OptimizableNodeDelegate(
+        name = name,
+        instruction = instruction,
+        description = description,
+        demonstrations = demonstrations,
+        promptFn = passthroughStringPromptFn,
+        executePrompt = null,
+        inputType = typeOf<String>(),
+        outputType = typeOf<String>(),
+    )
+}
+
+/**
+ * Prompt function for passthrough nodes: builds system(instruction) + demo pairs,
+ * without the trailing user(input) message (which is added by the subsequent nodeLLMRequest).
+ */
+private val passthroughStringPromptFn: OptimizableNodePromptBuildFn<String, String> =
+    { instruction, demos, _ ->
+        prompt("optimizable-prompt-node") {
+            system(instruction)
+            for (demo in demos) {
+                user(demo.input)
+                assistant(demo.output)
+            }
+        }
+    }
 
 /**
  * Gets the current [OptimizationConfig] from the coroutine context, if present.
