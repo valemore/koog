@@ -91,6 +91,7 @@ public abstract class AIAgentSubgraphBuilderBase<Input, Output> {
      * @param llmModel Initial LLM model used in this subgraph
      * @param llmParams Initial LLM prompt parameters used in this subgraph
      * @param responseProcessor Initial optional processor defining the post-processing of messages returned from the LLM.
+     * @param freshHistory When true, the subgraph starts with an empty conversation history.
      * @param define Subgraph definition function
      */
     public inline fun <reified Input, reified Output> subgraph(
@@ -99,6 +100,7 @@ public abstract class AIAgentSubgraphBuilderBase<Input, Output> {
         llmModel: LLModel? = null,
         llmParams: LLMParams? = null,
         responseProcessor: ResponseProcessor? = null,
+        freshHistory: Boolean = false,
         define: AIAgentSubgraphBuilderBase<Input, Output>.() -> Unit
     ): AIAgentSubgraphDelegate<Input, Output> {
         return AIAgentSubgraphBuilder<Input, Output>(
@@ -109,6 +111,7 @@ public abstract class AIAgentSubgraphBuilderBase<Input, Output> {
             llmModel = llmModel,
             llmParams = llmParams,
             responseProcessor = responseProcessor,
+            freshHistory = freshHistory,
         ).also { it.define() }.build()
     }
 
@@ -119,6 +122,7 @@ public abstract class AIAgentSubgraphBuilderBase<Input, Output> {
      * @param llmModel Initial LLM model used in this subgraph
      * @param llmParams Initial LLM prompt parameters used in this subgraph
      * @param responseProcessor Initial optional processor defining the post-processing of messages returned from the LLM.
+     * @param freshHistory When true, the subgraph starts with an empty conversation history.
      * @param define Subgraph definition function
      */
     public inline fun <reified Input, reified Output> subgraph(
@@ -127,6 +131,7 @@ public abstract class AIAgentSubgraphBuilderBase<Input, Output> {
         llmModel: LLModel? = null,
         llmParams: LLMParams? = null,
         responseProcessor: ResponseProcessor? = null,
+        freshHistory: Boolean = false,
         define: AIAgentSubgraphBuilderBase<Input, Output>.() -> Unit
     ): AIAgentSubgraphDelegate<Input, Output> {
         return subgraph(
@@ -135,6 +140,7 @@ public abstract class AIAgentSubgraphBuilderBase<Input, Output> {
             llmModel = llmModel,
             llmParams = llmParams,
             responseProcessor = responseProcessor,
+            freshHistory = freshHistory,
             define = define
         )
     }
@@ -312,6 +318,7 @@ public class AIAgentSubgraphBuilder<Input, Output>(
     private val llmModel: LLModel?,
     private val llmParams: LLMParams?,
     private val responseProcessor: ResponseProcessor? = null,
+    private val freshHistory: Boolean = false,
 ) : AIAgentSubgraphBuilderBase<Input, Output>(),
     BaseBuilder<AIAgentSubgraphDelegate<Input, Output>> {
     override val nodeStart: StartNode<Input> = StartNode(subgraphName = name, type = inputType)
@@ -322,7 +329,7 @@ public class AIAgentSubgraphBuilder<Input, Output>(
             "FinishSubgraphNode can't be reached from the StartNode of the agent's graph. Please, review how it was defined."
         }
 
-        return AIAgentSubgraphDelegate(name, nodeStart, nodeFinish, toolSelectionStrategy, llmModel, llmParams, responseProcessor)
+        return AIAgentSubgraphDelegate(name, nodeStart, nodeFinish, toolSelectionStrategy, llmModel, llmParams, responseProcessor, freshHistory)
     }
 }
 
@@ -346,6 +353,7 @@ public class AIAgentSubgraphBuilder<Input, Output>(
  * @property llmModel Initial LLM model used in this subgraph
  * @property llmParams Initial LLM prompt parameters used in this subgraph
  * @property responseProcessor Initial optional processor defining the post-processing of messages returned from the LLM.
+ * @property freshHistory When true, the subgraph starts with an empty conversation history.
  */
 public open class AIAgentSubgraphDelegate<Input, Output> internal constructor(
     private val name: String?,
@@ -355,6 +363,7 @@ public open class AIAgentSubgraphDelegate<Input, Output> internal constructor(
     private val llmModel: LLModel?,
     private val llmParams: LLMParams?,
     private val responseProcessor: ResponseProcessor? = null,
+    private val freshHistory: Boolean = false,
 ) {
     private var subgraph: AIAgentSubgraph<Input, Output>? = null
 
@@ -381,6 +390,7 @@ public open class AIAgentSubgraphDelegate<Input, Output> internal constructor(
                 llmModel = llmModel,
                 llmParams = llmParams,
                 responseProcessor = responseProcessor,
+                freshHistory = freshHistory,
             )
         }
 

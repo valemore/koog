@@ -155,6 +155,7 @@ internal fun <Output : Any> identityTool(outputClass: KClass<Output>): Tool<Outp
  * @param runMode The mode in which tools are executed. Defaults to sequential execution.
  * @param assistantResponseRepeatMax The maximum number of assistant responses allowed before determining that the task cannot be completed.
  * @param responseProcessor An optional processor defining the post-processing of messages returned from the LLM.
+ * @param freshHistory When true, the subgraph starts with an empty conversation history.
  * @param defineTask A suspending lambda function that defines the task for the subgraph, taking the input as a parameter.
  * @return A delegate that represents the created subgraph, allowing input and output operations.
  */
@@ -168,6 +169,7 @@ public inline fun <reified Input, reified Output> AIAgentSubgraphBuilderBase<*, 
     runMode: ToolCalls = ToolCalls.SEQUENTIAL,
     assistantResponseRepeatMax: Int? = null,
     responseProcessor: ResponseProcessor? = null,
+    freshHistory: Boolean = false,
     noinline defineTask: suspend AIAgentGraphContextBase.(input: Input) -> String
 ): AIAgentSubgraphDelegate<Input, Output> = subgraph(
     name = name,
@@ -175,6 +177,7 @@ public inline fun <reified Input, reified Output> AIAgentSubgraphBuilderBase<*, 
     llmModel = llmModel,
     llmParams = llmParams,
     responseProcessor = responseProcessor,
+    freshHistory = freshHistory,
 ) {
     val finishTool = identityTool<Output>()
 
@@ -182,6 +185,7 @@ public inline fun <reified Input, reified Output> AIAgentSubgraphBuilderBase<*, 
         finishTool = finishTool,
         runMode = runMode,
         assistantResponseRepeatMax = assistantResponseRepeatMax,
+        freshHistory = freshHistory,
         defineTask = defineTask
     )
 }
@@ -197,6 +201,7 @@ public inline fun <reified Input, reified Output> AIAgentSubgraphBuilderBase<*, 
  * @param runMode The mode in which tools are executed. Defaults to sequential execution.
  * @param assistantResponseRepeatMax The maximum number of assistant responses allowed before determining that the task cannot be completed.
  * @param responseProcessor An optional processor defining the post-processing of messages returned from the LLM.
+ * @param freshHistory When true, the subgraph starts with an empty conversation history.
  * @param defineTask A suspend function that defines the task to be executed by the subgraph based on the given input.
  * @return A delegate representing the subgraph that processes the input and produces a result through the finish tool.
  */
@@ -209,6 +214,7 @@ public inline fun <reified Input, reified Output> AIAgentSubgraphBuilderBase<*, 
     runMode: ToolCalls = ToolCalls.SEQUENTIAL,
     assistantResponseRepeatMax: Int? = null,
     responseProcessor: ResponseProcessor? = null,
+    freshHistory: Boolean = false,
     noinline defineTask: suspend AIAgentGraphContextBase.(input: Input) -> String
 ): AIAgentSubgraphDelegate<Input, Output> = subgraphWithTask(
     toolSelectionStrategy = ToolSelectionStrategy.Tools(tools.map { it.descriptor }),
@@ -218,6 +224,7 @@ public inline fun <reified Input, reified Output> AIAgentSubgraphBuilderBase<*, 
     runMode = runMode,
     assistantResponseRepeatMax = assistantResponseRepeatMax,
     responseProcessor = responseProcessor,
+    freshHistory = freshHistory,
     defineTask = defineTask
 )
 
@@ -235,6 +242,7 @@ public inline fun <reified Input, reified Output> AIAgentSubgraphBuilderBase<*, 
  * @param runMode The mode in which tools are executed. Defaults to sequential execution.
  * @param assistantResponseRepeatMax The maximum number of assistant responses allowed before determining that the task cannot be completed.
  * @param responseProcessor An optional processor defining the post-processing of messages returned from the LLM.
+ * @param freshHistory When true, the subgraph starts with an empty conversation history.
  * @param defineTask A lambda function to define the task logic, which accepts the input and returns a task description.
  * @return A delegate object representing the constructed subgraph for the specified task.
  */
@@ -249,6 +257,7 @@ public inline fun <reified Input, reified Output, reified OutputTransformed> AIA
     runMode: ToolCalls = ToolCalls.SEQUENTIAL,
     assistantResponseRepeatMax: Int? = null,
     responseProcessor: ResponseProcessor? = null,
+    freshHistory: Boolean = false,
     noinline defineTask: suspend AIAgentGraphContextBase.(input: Input) -> String
 ): AIAgentSubgraphDelegate<Input, OutputTransformed> = subgraph(
     name = name,
@@ -256,11 +265,13 @@ public inline fun <reified Input, reified Output, reified OutputTransformed> AIA
     llmModel = llmModel,
     llmParams = llmParams,
     responseProcessor = responseProcessor,
+    freshHistory = freshHistory,
 ) {
     setupSubgraphWithTask<Input, Output, OutputTransformed>(
         finishTool = finishTool,
         runMode = runMode,
         assistantResponseRepeatMax = assistantResponseRepeatMax,
+        freshHistory = freshHistory,
         defineTask = defineTask
     )
 }
@@ -279,6 +290,7 @@ public inline fun <reified Input, reified Output, reified OutputTransformed> AIA
  * @param runMode The mode in which tools are executed. Defaults to sequential execution.
  * @param assistantResponseRepeatMax The maximum number of assistant responses allowed before determining that the task cannot be completed.
  * @param responseProcessor An optional processor defining the post-processing of messages returned from the LLM.
+ * @param freshHistory When true, the subgraph starts with an empty conversation history.
  * @param defineTask A suspend function that defines the task to be executed in the subgraph, based on the provided input.
  * @return A subgraph delegate that handles the input and produces the transformed output for the defined task.
  */
@@ -293,6 +305,7 @@ public inline fun <reified Input, reified Output, reified OutputTransformed> AIA
     runMode: ToolCalls = ToolCalls.SEQUENTIAL,
     assistantResponseRepeatMax: Int? = null,
     responseProcessor: ResponseProcessor? = null,
+    freshHistory: Boolean = false,
     noinline defineTask: suspend AIAgentGraphContextBase.(input: Input) -> String
 ): AIAgentSubgraphDelegate<Input, OutputTransformed> = subgraph(
     name = name,
@@ -300,11 +313,13 @@ public inline fun <reified Input, reified Output, reified OutputTransformed> AIA
     llmModel = llmModel,
     llmParams = llmParams,
     responseProcessor = responseProcessor,
+    freshHistory = freshHistory,
 ) {
     setupSubgraphWithTask<Input, Output, OutputTransformed>(
         finishTool = finishTool,
         runMode = runMode,
         assistantResponseRepeatMax = assistantResponseRepeatMax,
+        freshHistory = freshHistory,
         defineTask = defineTask
     )
 }
@@ -450,6 +465,7 @@ public inline fun <reified Input, reified Output, reified OutputTransformed> AIA
  * @param runMode the mode in which tools are executed, e.g., parallel or sequential execution.
  * @param assistantResponseRepeatMax the maximum number of assistant responses allowed before
  *        determining that the task cannot be completed. If not provided, a default is used.
+ * @param freshHistory when true, the defineTask result is appended as a system message instead of user message.
  * @param defineTask a suspend function defining the task description, executed within the
  *        context of an AI agent graph and based on the given input data.
  */
@@ -458,6 +474,7 @@ public inline fun <reified Input, reified Output, reified OutputTransformed> AIA
     finishTool: Tool<Output, OutputTransformed>,
     runMode: ToolCalls,
     assistantResponseRepeatMax: Int? = null,
+    freshHistory: Boolean = false,
     noinline defineTask: suspend AIAgentGraphContextBase.(Input) -> String
 ) {
     val originalToolsKey = createStorageKey<List<ToolDescriptor>>("all-available-tools")
@@ -496,7 +513,22 @@ public inline fun <reified Input, reified Output, reified OutputTransformed> AIA
     // Helper node to overcome problems of the current api and repeat less code when writing routing conditions
     val nodeDecide by node<List<Message.Response>, List<Message.Response>> { it }
 
-    val nodeCallLLMDelegate = if (runMode == ToolCalls.SINGLE_RUN_SEQUENTIAL) {
+    val nodeCallLLMDelegate = if (freshHistory) {
+        // When freshHistory is true, the defineTask result becomes a system message
+        // rather than a user message to serve as the subgraph's own instruction.
+        node<String, List<Message.Response>> { message ->
+            llm.writeSession {
+                appendPrompt {
+                    system(message)
+                }
+                if (runMode == ToolCalls.SINGLE_RUN_SEQUENTIAL) {
+                    listOf(requestLLM())
+                } else {
+                    requestLLMMultiple()
+                }
+            }
+        }
+    } else if (runMode == ToolCalls.SINGLE_RUN_SEQUENTIAL) {
         nodeLLMRequest().transform { listOf(it) }
     } else {
         nodeLLMRequestMultiple()

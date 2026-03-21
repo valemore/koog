@@ -14,6 +14,7 @@ import ai.koog.agents.core.dsl.extension.replaceHistoryWithTLDR
 import ai.koog.agents.core.prompt.Prompts.selectRelevantTools
 import ai.koog.agents.core.tools.ToolDescriptor
 import ai.koog.agents.core.tools.annotations.LLMDescription
+import ai.koog.prompt.dsl.Prompt
 import ai.koog.prompt.llm.LLModel
 import ai.koog.prompt.params.LLMParams
 import ai.koog.prompt.processor.ResponseProcessor
@@ -42,6 +43,8 @@ import kotlin.uuid.ExperimentalUuidApi
  * @param llmModel Optional [LLModel] override for the subgraph execution.
  * @param llmParams Optional [LLMParams] override for the prompt for the subgraph execution.
  * @param responseProcessor Optional [ResponseProcessor] override for the subgraph execution.
+ * @param freshHistory When true, the subgraph starts with an empty conversation history instead
+ *  of inheriting the parent context's prompt. The subgraph's history is discarded upon completion.
  */
 public open class AIAgentSubgraph<TInput, TOutput>(
     override val name: String,
@@ -51,6 +54,7 @@ public open class AIAgentSubgraph<TInput, TOutput>(
     private val llmModel: LLModel? = null,
     private val llmParams: LLMParams? = null,
     private val responseProcessor: ResponseProcessor? = null,
+    private val freshHistory: Boolean = false,
 ) : AIAgentNodeBase<TInput, TOutput>(), ExecutionPointNode {
     override val inputType: KType = start.inputType
     override val outputType: KType = finish.outputType
@@ -164,12 +168,19 @@ public open class AIAgentSubgraph<TInput, TOutput>(
             // Copy inner context with new tools, model and LLM params.
             val initialLLMContext = context.llm
 
+            val effectiveParams = llmParams ?: context.llm.prompt.params
+            val innerPrompt = if (freshHistory) {
+                Prompt(messages = emptyList(), id = context.llm.prompt.id, params = effectiveParams)
+            } else {
+                context.llm.prompt.copy(params = effectiveParams)
+            }
+
             context.replace(
                 context.copy(
                     llm = context.llm.copy(
                         tools = newTools,
                         model = llmModel ?: context.llm.model,
-                        prompt = context.llm.prompt.copy(params = llmParams ?: context.llm.prompt.params),
+                        prompt = innerPrompt,
                         responseProcessor = responseProcessor ?: context.llm.responseProcessor,
                     ),
                 ),
@@ -192,12 +203,17 @@ public open class AIAgentSubgraph<TInput, TOutput>(
                 throw e
             }
 
-            // Restore original LLM context with updated message history.
+            // Restore original LLM context. When freshHistory is enabled, the subgraph's
+            // conversation is self-contained — discard it and restore the original prompt.
+            val restoredPrompt = if (freshHistory) {
+                initialLLMContext.prompt
+            } else {
+                context.llm.prompt.copy(params = initialLLMContext.prompt.params)
+            }
+
             context.replace(
                 context.copy(
-                    llm = initialLLMContext.copy(
-                        prompt = context.llm.prompt.copy(params = initialLLMContext.prompt.params)
-                    ),
+                    llm = initialLLMContext.copy(prompt = restoredPrompt),
                 ),
             )
 
