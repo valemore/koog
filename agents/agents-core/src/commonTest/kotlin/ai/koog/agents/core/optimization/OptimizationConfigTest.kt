@@ -1,0 +1,95 @@
+package ai.koog.agents.core.optimization
+
+import ai.koog.agents.core.optimization.core.Demonstration
+import ai.koog.agents.core.optimization.core.OptimizationConfig
+import kotlinx.serialization.json.Json
+import kotlin.js.JsName
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertNull
+
+class OptimizationConfigTest {
+
+    private val json = Json { prettyPrint = true }
+
+    @Test
+    @JsName("testGetInstructionReturnsConfiguredValue")
+    fun testGetInstructionReturnsConfiguredValue() {
+        val config = OptimizationConfig(
+            subgraphInstructions = mapOf("classify" to "Classify the sentiment.")
+        )
+        assertEquals("Classify the sentiment.", config.getInstruction("classify"))
+    }
+
+    @Test
+    @JsName("testGetInstructionReturnsNullForMissingKey")
+    fun testGetInstructionReturnsNullForMissingKey() {
+        val config = OptimizationConfig()
+        assertNull(config.getInstruction("nonexistent"))
+    }
+
+    @Test
+    @JsName("testGetDemonstrationsReturnsEmptyForMissingKey")
+    fun testGetDemonstrationsReturnsEmptyForMissingKey() {
+        val config = OptimizationConfig()
+        assertEquals(emptyList(), config.getDemonstrations("nonexistent"))
+    }
+
+    @Test
+    @JsName("testWithSubgraphInstructionCreatesNewConfigWithoutMutatingOriginal")
+    fun testWithSubgraphInstructionCreatesNewConfigWithoutMutatingOriginal() {
+        val original = OptimizationConfig()
+        val updated = original.withSubgraphInstruction("classify", "New instruction")
+        assertEquals("New instruction", updated.getInstruction("classify"))
+        assertNull(original.getInstruction("classify"), "Original config must not be mutated")
+    }
+
+    @Test
+    @JsName("testMergeWithOtherTakesPrecedence")
+    fun testMergeWithOtherTakesPrecedence() {
+        val base = OptimizationConfig(
+            strategyInstruction = "base strategy",
+            subgraphInstructions = mapOf("a" to "base-a", "b" to "base-b"),
+        )
+        val override = OptimizationConfig(
+            subgraphInstructions = mapOf("a" to "override-a"),
+        )
+        val merged = base.mergeWith(override)
+        assertEquals("override-a", merged.getInstruction("a"))
+        assertEquals("base-b", merged.getInstruction("b"))
+        assertEquals("base strategy", merged.strategyInstruction)
+    }
+
+    @Test
+    @JsName("testSerializationRoundTrip")
+    fun testSerializationRoundTrip() {
+        val config = OptimizationConfig(
+            strategyInstruction = "Be helpful",
+            strategyDemonstrations = listOf(Demonstration("hello", "Hi there!")),
+            subgraphInstructions = mapOf("classify" to "Classify sentiment."),
+            subgraphDemonstrations = mapOf(
+                "classify" to listOf(
+                    Demonstration("great movie", "positive"),
+                    Demonstration("terrible", "negative"),
+                ),
+            ),
+        )
+        val encoded = json.encodeToString(OptimizationConfig.serializer(), config)
+        val decoded = json.decodeFromString(OptimizationConfig.serializer(), encoded)
+        assertEquals(config, decoded)
+    }
+
+    @Test
+    @JsName("testImmutableConfigSafeForParallelTrials")
+    fun testImmutableConfigSafeForParallelTrials() {
+        val base = OptimizationConfig(
+            subgraphInstructions = mapOf("classify" to "base instruction"),
+        )
+        val trial1 = base.withSubgraphInstruction("classify", "trial 1 instruction")
+        val trial2 = base.withSubgraphInstruction("classify", "trial 2 instruction")
+
+        assertEquals("base instruction", base.getInstruction("classify"))
+        assertEquals("trial 1 instruction", trial1.getInstruction("classify"))
+        assertEquals("trial 2 instruction", trial2.getInstruction("classify"))
+    }
+}

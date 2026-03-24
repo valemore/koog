@@ -24,6 +24,7 @@ import kotlin.reflect.KProperty
  * at node execution time. Graph construction always completes before execution starts,
  * so the name is guaranteed to be set when nodes read it.
  */
+// TODO: Is this a redundant holder? I believe we can capture names directly in the delegate.
 @PublishedApi
 internal class SubgraphNameHolder {
     var name: String? = null
@@ -131,7 +132,7 @@ public inline fun <reified Input, reified Output> AIAgentSubgraphBuilderBase<*, 
             assistantResponseRepeatMax = assistantResponseRepeatMax,
             freshHistory = freshHistory,
 
-            // DIFF 1: Resolve instruction from OptimizationConfig, pass to user's defineTask
+            // Resolve instruction from OptimizationConfig, pass to user's defineTask
             defineTask = defineTask@{ input ->
                 val subgraphName = nameHolder.name
                     ?: error("Optimizable subgraph name was not resolved. This is a framework bug.")
@@ -142,7 +143,7 @@ public inline fun <reified Input, reified Output> AIAgentSubgraphBuilderBase<*, 
                 defineTask(effectiveInstruction, input)
             },
 
-            // DIFF 2: Inject demonstrations after task description, before LLM request
+            // Inject demonstrations after task description, before LLM request
             beforeLLMRequest = beforeLLMRequest@{
                 val subgraphName = nameHolder.name ?: return@beforeLLMRequest
                 val config = storage.get(OptimizationConfig.STORAGE_KEY)
@@ -172,9 +173,9 @@ public inline fun <reified Input, reified Output> AIAgentSubgraphBuilderBase<*, 
                 }
             },
 
-            // DIFF 3: Export intermediate messages for trace collection
-            afterFinishToolCall = {
-                val subgraphName = nameHolder.name ?: return@setupSubgraphWithTask
+            // Export intermediate messages for trace collection
+            afterFinishToolCall = afterFinishToolCall@{
+                val subgraphName = nameHolder.name ?: return@afterFinishToolCall
                 val messages = llm.readSession { prompt.messages }
                 storage.set(intermediateMessagesKey(subgraphName), messages)
             },

@@ -13,17 +13,28 @@ import ai.koog.prompt.message.Message
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
+// TODO: this global cache is needed because AIAgentStorageKey uses reference equality.
+//  Consider adding equals/hashCode to AIAgentStorageKey instead.
+private val intermediateMessagesKeyCache = mutableMapOf<String, AIAgentStorageKey<List<Message>>>()
+
 /**
- * Returns a storage key for intermediate messages captured by an optimizable subgraph.
+ * Returns a cached storage key for intermediate messages captured by an optimizable subgraph.
  *
- * Optimizable subgraphs export their prompt messages to this key before the prompt
- * is discarded on freshHistory restore. The trace collection feature reads these
- * in the completion handler.
+ * Optimizable subgraphs export their prompt messages to this key (via the `afterFinishToolCall`
+ * hook) before the prompt is discarded on freshHistory restore. The
+ * [SubgraphTraceCollectionFeature] reads this key in its subgraph completion handler to
+ * populate [Demonstration.intermediateMessages].
  *
- * Keyed by subgraph name to avoid collisions during parallel execution.
+ * Keys are cached by [subgraphName] to ensure the same [AIAgentStorageKey] instance is
+ * used for both writing and reading, since [AIAgentStorageKey] uses reference equality.
+ *
+ * @param subgraphName The name of the subgraph whose intermediate messages are stored.
+ * @return A storage key for the intermediate messages list.
  */
 public fun intermediateMessagesKey(subgraphName: String): AIAgentStorageKey<List<Message>> =
-    createStorageKey("optimization-intermediate-messages-$subgraphName")
+    intermediateMessagesKeyCache.getOrPut(subgraphName) {
+        createStorageKey("optimization-intermediate-messages-$subgraphName")
+    }
 
 /**
  * Configuration for [SubgraphTraceCollectionFeature].
