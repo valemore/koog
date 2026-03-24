@@ -1,6 +1,9 @@
 package ai.koog.agents.core.optimization.core
 
 import ai.koog.prompt.message.Message
+import ai.koog.prompt.message.RequestMetaInfo
+import ai.koog.prompt.message.ResponseMetaInfo
+import kotlinx.datetime.Clock
 
 /**
  * Renders demonstrations into prompt-ready content based on the chosen format and insertion mode.
@@ -69,8 +72,9 @@ public object DemonstrationRenderer {
         if (format == DemonstrationFormat.FULL_TRACE && demo.intermediateMessages != null) {
             addAll(demo.intermediateMessages.map { remapSystemToUser(it) })
         } else {
-            add(Message.User(demo.input))
-            add(Message.Assistant(demo.output))
+            // TODO: Does this preserve all correctness invariants on the timestamps?
+            add(Message.User(demo.input, RequestMetaInfo(Clock.System.now())))
+            add(Message.Assistant(demo.output, ResponseMetaInfo(Clock.System.now())))
         }
     }
 
@@ -79,7 +83,10 @@ public object DemonstrationRenderer {
      * from appearing in the middle of the conversation history.
      */
     private fun remapSystemToUser(message: Message): Message = when (message) {
-        is Message.System -> Message.User(message.content)
+        is Message.System -> Message.User(
+            content = message.content,
+            metaInfo = RequestMetaInfo(timestamp = message.metaInfo.timestamp),
+        )
         else -> message
     }
 }

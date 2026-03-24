@@ -466,6 +466,12 @@ public inline fun <reified Input, reified Output, reified OutputTransformed> AIA
  * @param assistantResponseRepeatMax the maximum number of assistant responses allowed before
  *        determining that the task cannot be completed. If not provided, a default is used.
  * @param freshHistory when true, the defineTask result is appended as a system message instead of user message.
+ * @param beforeLLMRequest optional hook invoked after the task description is appended to the prompt
+ *        but before the LLM request is made. Used by optimization infrastructure to inject
+ *        few-shot demonstrations into the prompt.
+ * @param afterFinishToolCall optional hook invoked after the finish tool is called but before
+ *        tools are restored. Used by optimization infrastructure to export intermediate messages
+ *        for trace collection.
  * @param defineTask a suspend function defining the task description, executed within the
  *        context of an AI agent graph and based on the given input data.
  */
@@ -475,6 +481,8 @@ public inline fun <reified Input, reified Output, reified OutputTransformed> AIA
     runMode: ToolCalls,
     assistantResponseRepeatMax: Int? = null,
     freshHistory: Boolean = false,
+    noinline beforeLLMRequest: (suspend AIAgentGraphContextBase.() -> Unit)? = null,
+    noinline afterFinishToolCall: (suspend AIAgentGraphContextBase.() -> Unit)? = null,
     noinline defineTask: suspend AIAgentGraphContextBase.(Input) -> String
 ) {
     val originalToolsKey = createStorageKey<List<ToolDescriptor>>("all-available-tools")
@@ -502,6 +510,9 @@ public inline fun <reified Input, reified Output, reified OutputTransformed> AIA
     }
 
     val finalizeTask by node<ReceivedToolResult, OutputTransformed> { toolResult ->
+        // TODO: Figure out why it cannot be done through a feature
+        afterFinishToolCall?.invoke(this)
+
         llm.writeSession {
             // Restore original tools
             tools = storage.get(originalToolsKey)!!
@@ -513,6 +524,18 @@ public inline fun <reified Input, reified Output, reified OutputTransformed> AIA
     // Helper node to overcome problems of the current api and repeat less code when writing routing conditions
     val nodeDecide by node<List<Message.Response>, List<Message.Response>> { it }
 
+    // Passthrough node for the optional beforeLLMRequest hook.
+    // For non-freshHistory paths, this runs between task setup and the standard LLM request
+    // node, allowing injection of content (e.g. few-shot demonstrations) into the prompt.
+    // For freshHistory, the hook is called inline within the nodeCallLLM instead, because it
+    // must run after the system message is appended but before requestLLM.
+    val nodeBeforeLLM by node<String, String> { message ->
+        if (!freshHistory) {
+            beforeLLMRequest?.invoke(this)
+        }
+        message
+    }
+
     val nodeCallLLMDelegate = if (freshHistory) {
         // When freshHistory is true, the defineTask result becomes a system message
         // rather than a user message to serve as the subgraph's own instruction.
@@ -521,6 +544,10 @@ public inline fun <reified Input, reified Output, reified OutputTransformed> AIA
                 appendPrompt {
                     system(message)
                 }
+            }
+            // Hook runs here: after the system message, before LLM request.
+            beforeLLMRequest?.invoke(this)
+            llm.writeSession {
                 if (runMode == ToolCalls.SINGLE_RUN_SEQUENTIAL) {
                     listOf(requestLLM())
                 } else {
@@ -598,7 +625,7 @@ public inline fun <reified Input, reified Output, reified OutputTransformed> AIA
         }
     }
 
-    nodeStart then setupTask then nodeCallLLM then nodeDecide
+    nodeStart then setupTask then nodeBeforeLLM then nodeCallLLM then nodeDecide
 
     edge(
         nodeDecide forwardTo callToolsHacked
