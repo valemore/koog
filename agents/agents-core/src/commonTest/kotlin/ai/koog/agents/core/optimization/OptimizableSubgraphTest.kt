@@ -92,8 +92,6 @@ class OptimizableSubgraphTest {
         )
     }
 
-    // ==================== Instruction Resolution ====================
-
     @Test
     @JsName("testUsesDefaultInstructionWhenNoConfigInstalled")
     fun testUsesDefaultInstructionWhenNoConfigInstalled() = runTest {
@@ -156,8 +154,6 @@ class OptimizableSubgraphTest {
         )
     }
 
-    // ==================== freshHistory Interaction ====================
-
     @Test
     @JsName("testFreshHistoryStartsWithEmptyPromptAndSystemMessage")
     fun testFreshHistoryStartsWithEmptyPromptAndSystemMessage() = runTest {
@@ -189,8 +185,6 @@ class OptimizableSubgraphTest {
             it.content.contains("Default instruction.")
         })
     }
-
-    // ==================== Demo Injection ====================
 
     @Test
     @JsName("testDemosInjectedAsMessageHistoryAfterTaskDescription")
@@ -291,8 +285,6 @@ class OptimizableSubgraphTest {
         }, "Demo should be injected")
     }
 
-    // ==================== Name Resolution ====================
-
     @Test
     @JsName("testSubgraphNameDerivedFromPropertyName")
     fun testSubgraphNameDerivedFromPropertyName() = runTest {
@@ -347,8 +339,6 @@ class OptimizableSubgraphTest {
             "Should use explicit name 'custom-name' for config lookup, not property name 'myProperty'"
         )
     }
-
-    // ==================== Multiple Subgraphs ====================
 
     @Test
     @JsName("testMultipleSubgraphsEachGetOwnInstruction")
@@ -436,8 +426,6 @@ class OptimizableSubgraphTest {
             "Second subgraph should not see first subgraph's demos")
     }
 
-    // ==================== Duplicate Name Collision ====================
-
     @Test
     @JsName("testDuplicateNamesCauseConfigCollision")
     fun testDuplicateNamesCauseConfigCollision() = runTest {
@@ -480,8 +468,6 @@ class OptimizableSubgraphTest {
         assertTrue(prompts[1].messages.any { it.content.contains("Shared instruction") },
             "Duplicate names cause both subgraphs to share the same config entry (known limitation)")
     }
-
-    // ==================== Trace Collection ====================
 
     /** Helper to run an agent with trace collection and return the collected traces. */
     private suspend fun runWithTraceCollection(
@@ -590,12 +576,12 @@ class OptimizableSubgraphTest {
         assertNotNull(firstDemo.intermediateMessages)
         assertNotNull(secondDemo.intermediateMessages)
 
-        // First subgraph's intermediate should contain "First." instruction
+        // The first subgraph's intermediate should contain "First." instruction
         assertTrue(
             firstDemo.intermediateMessages.any { it.content.contains("First.") },
             "First subgraph's intermediate trace should contain its own instruction"
         )
-        // Second subgraph's intermediate should contain "Second." instruction
+        // The second subgraph's intermediate should contain "Second." instruction
         assertTrue(
             secondDemo.intermediateMessages.any { it.content.contains("Second.") },
             "Second subgraph's intermediate trace should contain its own instruction"

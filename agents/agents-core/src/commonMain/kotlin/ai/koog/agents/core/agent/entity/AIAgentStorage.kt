@@ -12,7 +12,16 @@ import kotlinx.coroutines.sync.withLock
  * @param name The string identifier that uniquely represents the storage key.
  */
 public class AIAgentStorageKey<T : Any>(public val name: String) {
-    override fun toString(): String = "${super.toString()}(name=$name)"
+    // Value-based equality is required so that independently created keys with the same
+    // name resolve to the same storage entry. Without this, code that creates keys
+    // dynamically (e.g. intermediateMessagesKey(subgraphName) called from different sites)
+    // would silently fail to find entries written by another call site.
+    override fun equals(other: Any?): Boolean =
+        this === other || (other is AIAgentStorageKey<*> && name == other.name)
+
+    override fun hashCode(): Int = name.hashCode()
+
+    override fun toString(): String = "AIAgentStorageKey(name=$name)"
 }
 
 /**

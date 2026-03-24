@@ -13,28 +13,22 @@ import ai.koog.prompt.message.Message
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
-// TODO: this global cache is needed because AIAgentStorageKey uses reference equality.
-//  Consider adding equals/hashCode to AIAgentStorageKey instead.
-private val intermediateMessagesKeyCache = mutableMapOf<String, AIAgentStorageKey<List<Message>>>()
-
 /**
- * Returns a cached storage key for intermediate messages captured by an optimizable subgraph.
+ * Returns a storage key for intermediate messages captured by an optimizable subgraph.
  *
- * Optimizable subgraphs export their prompt messages to this key (via the `afterFinishToolCall`
- * hook) before the prompt is discarded on freshHistory restore. The
- * [SubgraphTraceCollectionFeature] reads this key in its subgraph completion handler to
- * populate [Demonstration.intermediateMessages].
+ * The `afterFinishToolCall` hook in each optimizable subgraph writes its prompt messages
+ * to this key before the prompt is discarded on freshHistory restore. The
+ * [SubgraphTraceCollectionFeature] reads this key in its subgraph completion handler
+ * to populate [Demonstration.intermediateMessages].
  *
- * Keys are cached by [subgraphName] to ensure the same [AIAgentStorageKey] instance is
- * used for both writing and reading, since [AIAgentStorageKey] uses reference equality.
+ * Safe for concurrent use: [AIAgentStorageKey] implements value-based equality on [name],
+ * so independently created keys with the same subgraph name resolve to the same storage entry.
  *
  * @param subgraphName The name of the subgraph whose intermediate messages are stored.
  * @return A storage key for the intermediate messages list.
  */
 public fun intermediateMessagesKey(subgraphName: String): AIAgentStorageKey<List<Message>> =
-    intermediateMessagesKeyCache.getOrPut(subgraphName) {
-        createStorageKey("optimization-intermediate-messages-$subgraphName")
-    }
+    createStorageKey("optimization-intermediate-messages-$subgraphName")
 
 /**
  * Configuration for [SubgraphTraceCollectionFeature].
