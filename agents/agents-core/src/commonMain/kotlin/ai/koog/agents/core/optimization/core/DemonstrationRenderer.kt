@@ -89,4 +89,33 @@ public object DemonstrationRenderer {
         )
         else -> message
     }
+
+    /**
+     * Strips a common prefix of inherited messages from a full message list.
+     *
+     * Used to extract only the messages that a subgraph added to the prompt,
+     * excluding messages inherited from the parent context (relevant when
+     * `freshHistory = false`). Messages are compared by role and content.
+     *
+     * @param allMessages The full prompt messages at the end of subgraph execution.
+     * @param inherited The prompt messages captured before the subgraph started.
+     * @return Only the messages added by the subgraph.
+     */
+    public fun dropInheritedPrefix(
+        allMessages: List<Message>,
+        inherited: List<Message>,
+    ): List<Message> {
+        var matchCount = 0
+        for (i in inherited.indices) {
+            if (i < allMessages.size
+                && allMessages[i].role == inherited[i].role
+                && allMessages[i].content == inherited[i].content
+            ) {
+                matchCount++
+            } else {
+                break
+            }
+        }
+        return allMessages.drop(matchCount)
+    }
 }

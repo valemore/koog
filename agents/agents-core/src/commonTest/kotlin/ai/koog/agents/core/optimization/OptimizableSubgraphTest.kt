@@ -695,4 +695,173 @@ class OptimizableSubgraphTest {
         val outerTraces = traces.getTraces("outer")
         assertEquals(1, outerTraces.size, "Should collect trace for 'outer' wrapper")
     }
+
+    @Test
+    @JsName("testFreshHistoryIntermediateExcludesParent")
+    fun testFreshHistoryIntermediateExcludesParent() = runTest {
+        // freshHistory=true: intermediate messages should contain ONLY
+        // the subgraph's own conversation, not the parent system prompt.
+        val strategy = strategy<String, String>("test-strategy") {
+            val classify by optimizableSubgraphWithTask<String, String>(
+                optimizableInstruction = "Classify this.",
+                freshHistory = true,
+            ) { instruction, input -> "$instruction\n$input" }
+
+            nodeStart then classify then nodeFinish
+        }
+
+        val agent = AIAgent(
+            promptExecutor = createMockExecutor(),
+            strategy = strategy,
+            agentConfig = AIAgentConfig(
+                prompt = prompt("t") { system("Parent system prompt that should NOT appear.") },
+                model = model,
+                maxAgentIterations = 20,
+            ),
+            toolRegistry = ToolRegistry { },
+            installFeatures = { collectSubgraphTraces { } },
+        )
+        val session = agent.createSession()
+        val traces = session.pipeline()?.feature(
+            CollectedSubgraphTraces::class, SubgraphTraceCollectionFeature
+        )
+        session.run("hello")
+
+        assertNotNull(traces)
+        val demo = traces.getTraces("classify").first()
+        assertNotNull(demo.intermediateMessages)
+
+        // Should contain the subgraph's own system message (from defineTask)
+        assertTrue(
+            demo.intermediateMessages.any { it.content.contains("Classify this.") },
+            "Should contain subgraph's own instruction. Got: ${demo.intermediateMessages.map { "${it.role}: ${it.content.take(50)}" }}"
+        )
+
+        // Should NOT contain the parent system prompt
+        assertTrue(
+            demo.intermediateMessages.none { it.content.contains("Parent system prompt that should NOT appear") },
+            "Should not contain parent system prompt in freshHistory=true"
+        )
+    }
+
+    @Test
+    @JsName("testNonFreshHistoryIntermediateExcludesInherited")
+    fun testNonFreshHistoryIntermediateExcludesInherited() = runTest {
+        // freshHistory=false: intermediate messages should contain ONLY
+        // what the subgraph added, not the inherited parent conversation.
+        val strategy = strategy<String, String>("test-strategy") {
+            val classify by optimizableSubgraphWithTask<String, String>(
+                optimizableInstruction = "Classify this.",
+                freshHistory = false,
+            ) { instruction, input -> "$instruction\n$input" }
+
+            nodeStart then classify then nodeFinish
+        }
+
+        val agent = AIAgent(
+            promptExecutor = createMockExecutor(),
+            strategy = strategy,
+            agentConfig = AIAgentConfig(
+                prompt = prompt("t") {
+                    system("Inherited system prompt.")
+                    user("Inherited user message.")
+                    assistant("Inherited assistant reply.")
+                },
+                model = model,
+                maxAgentIterations = 20,
+            ),
+            toolRegistry = ToolRegistry { },
+            installFeatures = { collectSubgraphTraces { } },
+        )
+        val session = agent.createSession()
+        val traces = session.pipeline()?.feature(
+            CollectedSubgraphTraces::class, SubgraphTraceCollectionFeature
+        )
+        session.run("hello")
+
+        assertNotNull(traces)
+        val demo = traces.getTraces("classify").first()
+        assertNotNull(demo.intermediateMessages)
+
+        // Should NOT contain any of the inherited messages
+        assertTrue(
+            demo.intermediateMessages.none { it.content.contains("Inherited system prompt") },
+            "Should not contain inherited system prompt"
+        )
+        assertTrue(
+            demo.intermediateMessages.none { it.content.contains("Inherited user message") },
+            "Should not contain inherited user message"
+        )
+        assertTrue(
+            demo.intermediateMessages.none { it.content.contains("Inherited assistant reply") },
+            "Should not contain inherited assistant reply"
+        )
+
+        // Should contain the subgraph's own task description (as user message in non-fresh mode)
+        assertTrue(
+            demo.intermediateMessages.any { it.content.contains("Classify this.") },
+            "Should contain subgraph's own task. Got: ${demo.intermediateMessages.map { "${it.role}: ${it.content.take(50)}" }}"
+        )
+    }
+
+    @Test
+    @JsName("testIntermediateContainsToolCallsAndResults")
+    fun testIntermediateContainsToolCallsAndResults() = runTest {
+        // Verify intermediate messages include tool call/result messages
+        val strategy = strategy<String, String>("test-strategy") {
+            val classify by optimizableSubgraphWithTask<String, String>(
+                optimizableInstruction = "Classify.",
+                freshHistory = true,
+            ) { instruction, input -> "$instruction\n$input" }
+
+            nodeStart then classify then nodeFinish
+        }
+
+        val traces = runWithTraceCollection(strategy, "input")
+        val demo = traces.getTraces("classify").first()
+        assertNotNull(demo.intermediateMessages)
+
+        // Should contain a tool call (the finish tool)
+        assertTrue(
+            demo.intermediateMessages.any { it is Message.Tool.Call },
+            "Intermediate should contain tool call messages. Got roles: ${demo.intermediateMessages.map { it.role }}"
+        )
+    }
+
+    @Test
+    @JsName("testSequentialSubgraphsIntermediateDoNotLeak")
+    fun testSequentialSubgraphsIntermediateDoNotLeak() = runTest {
+        // Two sequential subgraphs with freshHistory=true.
+        // Each should have ONLY its own messages in intermediate, not the other's.
+        val strategy = strategy<String, String>("test-strategy") {
+            val first by optimizableSubgraphWithTask<String, String>(
+                optimizableInstruction = "First instruction.",
+                freshHistory = true,
+            ) { instruction, input -> "$instruction\n$input" }
+
+            val second by optimizableSubgraphWithTask<String, String>(
+                optimizableInstruction = "Second instruction.",
+                freshHistory = true,
+            ) { instruction, input -> "$instruction\n$input" }
+
+            nodeStart then first then second then nodeFinish
+        }
+
+        val traces = runWithTraceCollection(strategy, "input")
+
+        val firstDemo = traces.getTraces("first").first()
+        val secondDemo = traces.getTraces("second").first()
+        assertNotNull(firstDemo.intermediateMessages)
+        assertNotNull(secondDemo.intermediateMessages)
+
+        // First should contain "First instruction." but NOT "Second instruction."
+        assertTrue(firstDemo.intermediateMessages.any { it.content.contains("First instruction.") })
+        assertTrue(firstDemo.intermediateMessages.none { it.content.contains("Second instruction.") },
+            "First subgraph's intermediate should not contain second's messages")
+
+        // Second should contain "Second instruction." but NOT "First instruction."
+        assertTrue(secondDemo.intermediateMessages.any { it.content.contains("Second instruction.") })
+        assertTrue(secondDemo.intermediateMessages.none { it.content.contains("First instruction.") },
+            "Second subgraph's intermediate should not contain first's messages")
+    }
 }

@@ -8,6 +8,7 @@ import ai.koog.agents.core.annotation.InternalAgentsApi
 import ai.koog.agents.core.dsl.builder.AIAgentBuilderDslMarker
 import ai.koog.agents.core.dsl.builder.AIAgentSubgraphBuilderBase
 import ai.koog.agents.core.dsl.builder.AIAgentSubgraphDelegate
+import ai.koog.agents.core.optimization.features.inheritedMessagesKey
 import ai.koog.agents.core.optimization.features.intermediateMessagesKey
 import ai.koog.agents.core.tools.annotations.InternalAgentToolsApi
 import ai.koog.agents.ext.agent.identityTool
@@ -136,6 +137,12 @@ public inline fun <reified Input, reified Output> AIAgentSubgraphBuilderBase<*, 
             defineTask = defineTask@{ input ->
                 val subgraphName = nameHolder.name
                     ?: error("Optimizable subgraph name was not resolved. This is a framework bug.")
+
+                // Capture inherited prompt before the subgraph adds anything.
+                // Used later to strip the inherited prefix from intermediate messages.
+                val inherited = llm.readSession { prompt.messages }
+                storage.set(inheritedMessagesKey(subgraphName), inherited)
+
                 val artifact = storage.get(OptimizationArtifact.STORAGE_KEY)
                 val effectiveInstruction = artifact?.getInstruction(subgraphName)
                     ?: optimizableInstruction
@@ -177,11 +184,13 @@ public inline fun <reified Input, reified Output> AIAgentSubgraphBuilderBase<*, 
                 }
             },
 
-            // Export intermediate messages for trace collection
+            // Export intermediate messages for trace collection, stripping inherited prefix
             afterFinishToolCall = afterFinishToolCall@{
                 val subgraphName = nameHolder.name ?: return@afterFinishToolCall
-                val messages = llm.readSession { prompt.messages }
-                storage.set(intermediateMessagesKey(subgraphName), messages)
+                val allMessages = llm.readSession { prompt.messages }
+                val inherited = storage.get(inheritedMessagesKey(subgraphName)).orEmpty()
+                val subgraphOnly = DemonstrationRenderer.dropInheritedPrefix(allMessages, inherited)
+                storage.set(intermediateMessagesKey(subgraphName), subgraphOnly)
             },
         )
     }

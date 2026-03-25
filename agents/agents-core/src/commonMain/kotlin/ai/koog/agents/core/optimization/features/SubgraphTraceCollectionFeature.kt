@@ -31,6 +31,20 @@ public fun intermediateMessagesKey(subgraphName: String): AIAgentStorageKey<List
     createStorageKey("optimization-intermediate-messages-$subgraphName")
 
 /**
+ * Returns a storage key for the inherited prompt messages captured at the start of an
+ * optimizable subgraph, before any subgraph-specific content is added.
+ *
+ * Used to compute the diff between inherited and final messages, so that only the
+ * subgraph's own conversation is stored as intermediate messages (excluding parent history
+ * inherited via `freshHistory = false`).
+ *
+ * @param subgraphName The name of the subgraph.
+ * @return A storage key for the inherited messages list.
+ */
+public fun inheritedMessagesKey(subgraphName: String): AIAgentStorageKey<List<Message>> =
+    createStorageKey("optimization-inherited-messages-$subgraphName")
+
+/**
  * Configuration for [SubgraphTraceCollectionFeature].
  *
  * @property maxTracesPerSubgraph Maximum traces to store per subgraph. Zero or negative means unlimited.
