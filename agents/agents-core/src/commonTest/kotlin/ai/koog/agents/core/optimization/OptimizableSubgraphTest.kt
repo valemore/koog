@@ -7,7 +7,7 @@ import ai.koog.agents.core.dsl.builder.strategy
 import ai.koog.agents.core.optimization.core.Demonstration
 import ai.koog.agents.core.optimization.core.DemonstrationFormat
 import ai.koog.agents.core.optimization.core.FewShotPromptType
-import ai.koog.agents.core.optimization.core.OptimizationConfig
+import ai.koog.agents.core.optimization.core.OptimizationArtifact
 import ai.koog.agents.core.optimization.core.optimizableSubgraphWithTask
 import ai.koog.agents.core.optimization.features.CollectedSubgraphTraces
 import ai.koog.agents.core.optimization.features.SubgraphTraceCollectionFeature
@@ -44,7 +44,7 @@ class OptimizableSubgraphTest {
     private fun createAgent(
         freshHistory: Boolean = true,
         optimizableInstruction: String = "Default instruction.",
-        config: OptimizationConfig? = null,
+        config: OptimizationArtifact? = null,
         capturedPrompts: MutableList<Prompt>? = null,
         fewShotPromptType: FewShotPromptType = FewShotPromptType.AS_MESSAGE_HISTORY,
         demonstrationFormat: DemonstrationFormat = DemonstrationFormat.COMPACT,
@@ -78,7 +78,7 @@ class OptimizableSubgraphTest {
             toolRegistry = ToolRegistry { },
             installFeatures = {
                 if (config != null) {
-                    installOptimization { this.config = config }
+                    installOptimization { artifact = config }
                 }
                 if (capturedPrompts != null) {
                     install(EventHandler) {
@@ -118,7 +118,7 @@ class OptimizableSubgraphTest {
         createAgent(
             freshHistory = true,
             optimizableInstruction = "Default instruction.",
-            config = OptimizationConfig(
+            config = OptimizationArtifact(
                 subgraphInstructions = mapOf("other-subgraph" to "Should not appear"),
             ),
             capturedPrompts = prompts,
@@ -137,7 +137,7 @@ class OptimizableSubgraphTest {
         createAgent(
             freshHistory = true,
             optimizableInstruction = "Default instruction.",
-            config = OptimizationConfig(
+            config = OptimizationArtifact(
                 subgraphInstructions = mapOf("classify" to "Optimized: classify with care."),
             ),
             capturedPrompts = prompts,
@@ -197,7 +197,7 @@ class OptimizableSubgraphTest {
 
         createAgent(
             freshHistory = true,
-            config = OptimizationConfig(subgraphDemonstrations = mapOf("classify" to demos)),
+            config = OptimizationArtifact(subgraphDemonstrations = mapOf("classify" to demos)),
             fewShotPromptType = FewShotPromptType.AS_MESSAGE_HISTORY,
             capturedPrompts = prompts,
         ).use { it.run("real input") }
@@ -223,7 +223,7 @@ class OptimizableSubgraphTest {
 
         createAgent(
             freshHistory = true,
-            config = OptimizationConfig(subgraphDemonstrations = mapOf("classify" to demos)),
+            config = OptimizationArtifact(subgraphDemonstrations = mapOf("classify" to demos)),
             fewShotPromptType = FewShotPromptType.AS_STRING,
             capturedPrompts = prompts,
         ).use { it.run("real input") }
@@ -245,7 +245,7 @@ class OptimizableSubgraphTest {
 
         createAgent(
             freshHistory = true,
-            config = OptimizationConfig(
+            config = OptimizationArtifact(
                 subgraphDemonstrations = mapOf("other" to listOf(Demonstration("x", "y"))),
             ),
             capturedPrompts = prompts,
@@ -266,7 +266,7 @@ class OptimizableSubgraphTest {
 
         createAgent(
             freshHistory = false,
-            config = OptimizationConfig(subgraphDemonstrations = mapOf("classify" to demos)),
+            config = OptimizationArtifact(subgraphDemonstrations = mapOf("classify" to demos)),
             fewShotPromptType = FewShotPromptType.AS_MESSAGE_HISTORY,
             capturedPrompts = prompts,
         ).use { it.run("real input") }
@@ -292,7 +292,7 @@ class OptimizableSubgraphTest {
 
         createAgent(
             freshHistory = true,
-            config = OptimizationConfig(
+            config = OptimizationArtifact(
                 subgraphInstructions = mapOf("classify" to "Name-resolved instruction"),
             ),
             capturedPrompts = prompts,
@@ -326,7 +326,7 @@ class OptimizableSubgraphTest {
             toolRegistry = ToolRegistry { },
             installFeatures = {
                 installOptimization {
-                    config = OptimizationConfig(
+                    artifact = OptimizationArtifact(
                         subgraphInstructions = mapOf("custom-name" to "Custom instruction"),
                     )
                 }
@@ -366,7 +366,7 @@ class OptimizableSubgraphTest {
             toolRegistry = ToolRegistry { },
             installFeatures = {
                 installOptimization {
-                    config = OptimizationConfig(
+                    artifact = OptimizationArtifact(
                         subgraphInstructions = mapOf(
                             "first" to "Optimized first",
                             "second" to "Optimized second",
@@ -410,7 +410,7 @@ class OptimizableSubgraphTest {
             toolRegistry = ToolRegistry { },
             installFeatures = {
                 installOptimization {
-                    config = OptimizationConfig(
+                    artifact = OptimizationArtifact(
                         subgraphDemonstrations = mapOf(
                             "first" to listOf(Demonstration("first-demo-in", "first-demo-out")),
                         ),
@@ -455,7 +455,7 @@ class OptimizableSubgraphTest {
             toolRegistry = ToolRegistry { },
             installFeatures = {
                 installOptimization {
-                    config = OptimizationConfig(
+                    artifact = OptimizationArtifact(
                         subgraphInstructions = mapOf("task" to "Shared instruction"),
                     )
                 }
@@ -613,5 +613,86 @@ class OptimizableSubgraphTest {
         // With freshHistory, each subgraph starts fresh, so the latest prompt
         // reflects the second subgraph's conversation (last LLM call).
         assertTrue(fullPrompt.messages.isNotEmpty())
+    }
+
+    @Test
+    @JsName("testNestedOptimizableSubgraph")
+    fun testNestedOptimizableSubgraph() = runTest {
+        // Strategy → outer (regular subgraph) → inner (optimizable)
+        // Depth 3: strategy > subgraph > optimizableSubgraphWithTask
+        val prompts = mutableListOf<Prompt>()
+
+        val strategy = strategy<String, String>("test-strategy") {
+            val outer by subgraph<String, String>(name = "outer") {
+                val inner by optimizableSubgraphWithTask<String, String>(
+                    optimizableInstruction = "Inner default.",
+                    freshHistory = true,
+                ) { instruction, input -> "$instruction\n$input" }
+
+                nodeStart then inner then nodeFinish
+            }
+
+            nodeStart then outer then nodeFinish
+        }
+
+        val agent = AIAgent(
+            promptExecutor = createMockExecutor(),
+            strategy = strategy,
+            agentConfig = AIAgentConfig(
+                prompt = prompt("t") { system("Strategy prompt.") },
+                model = model,
+                maxAgentIterations = 40,
+            ),
+            toolRegistry = ToolRegistry { },
+            installFeatures = {
+                installOptimization {
+                    artifact = OptimizationArtifact(
+                        subgraphInstructions = mapOf("inner" to "Optimized inner"),
+                        subgraphDemonstrations = mapOf(
+                            "inner" to listOf(Demonstration("demo-in", "demo-out")),
+                        ),
+                    )
+                }
+                install(EventHandler) { onLLMCallStarting { prompts += it.prompt } }
+                collectSubgraphTraces { }
+            },
+        )
+        val session = agent.createSession()
+        val traces = session.pipeline()?.feature(
+            CollectedSubgraphTraces::class, SubgraphTraceCollectionFeature
+        )
+        session.run("nested-input")
+
+        // Instruction resolved from config
+        assertTrue(prompts.isNotEmpty())
+        assertTrue(
+            prompts.first().messages.any { it.content.contains("Optimized inner") },
+            "Nested optimizable subgraph should use config instruction"
+        )
+        assertTrue(
+            prompts.first().messages.none { it.content.contains("Inner default.") },
+            "Default instruction should not appear"
+        )
+
+        // Demos injected
+        assertTrue(
+            prompts.first().messages.any { it.content == "demo-in" },
+            "Demos should be injected into nested subgraph"
+        )
+        assertTrue(
+            prompts.first().messages.any { it.content == "demo-out" },
+            "Demos should be injected into nested subgraph"
+        )
+
+        // Traces collected for both outer and inner
+        assertNotNull(traces)
+        val innerTraces = traces.getTraces("inner")
+        assertEquals(1, innerTraces.size, "Should collect trace for nested 'inner'")
+        assertEquals("nested-input", innerTraces.first().input)
+        assertNotNull(innerTraces.first().intermediateMessages,
+            "Nested subgraph should export intermediate messages")
+
+        val outerTraces = traces.getTraces("outer")
+        assertEquals(1, outerTraces.size, "Should collect trace for 'outer' wrapper")
     }
 }

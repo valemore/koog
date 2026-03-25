@@ -62,9 +62,9 @@ public class OptimizableSubgraphDelegate<Input, Output> @PublishedApi internal c
  * an optimizer without modifying the graph.
  *
  * The three differences from `subgraphWithTask`:
- * 1. **Instruction resolution**: the effective instruction is read from [OptimizationConfig] in
+ * 1. **Instruction resolution**: the effective instruction is read from [OptimizationArtifact] in
  *    storage (falling back to [optimizableInstruction]), then passed to [defineTask].
- * 2. **Demo injection**: demonstrations from [OptimizationConfig] are injected into the prompt
+ * 2. **Demo injection**: demonstrations from [OptimizationArtifact] are injected into the prompt
  *    after the task description, before the LLM request.
  * 3. **Trace export**: intermediate messages are saved to storage before the prompt is discarded,
  *    enabling [SubgraphTraceCollectionFeature][ai.koog.agents.core.optimization.features.SubgraphTraceCollectionFeature]
@@ -74,7 +74,7 @@ public class OptimizableSubgraphDelegate<Input, Output> @PublishedApi internal c
  * is not installed, the subgraph uses [optimizableInstruction] and empty demonstrations.
  *
  * **Important**: subgraph names must be globally unique within a strategy for optimization to
- * work correctly. The [OptimizationConfig] uses the subgraph name as a lookup key — duplicate
+ * work correctly. The [OptimizationArtifact] uses the subgraph name as a lookup key — duplicate
  * names will cause incorrect instruction/demo assignment. If [name] is not provided, the
  * property name is used (same convention as regular nodes and subgraphs in koog).
  *
@@ -84,9 +84,9 @@ public class OptimizableSubgraphDelegate<Input, Output> @PublishedApi internal c
  *
  * @param Input The input type for the subgraph.
  * @param Output The output type for the subgraph.
- * @param optimizableInstruction Default instruction, overridable by [OptimizationConfig].
+ * @param optimizableInstruction Default instruction, overridable by [OptimizationArtifact].
  * @param name Optional subgraph name. If null, derived from the delegated property name.
- *   Used as the key for [OptimizationConfig] lookup.
+ *   Used as the key for [OptimizationArtifact] lookup.
  * @param toolSelectionStrategy Strategy for selecting available tools.
  * @param llmModel Optional LLM model override.
  * @param llmParams Optional LLM parameters override.
@@ -94,8 +94,8 @@ public class OptimizableSubgraphDelegate<Input, Output> @PublishedApi internal c
  * @param assistantResponseRepeatMax Max retries when model doesn't call tools.
  * @param responseProcessor Optional post-processing of LLM responses.
  * @param freshHistory When true, the subgraph starts with an empty conversation history.
- * @param fewShotPromptType How demonstrations are inserted into the prompt.
- * @param demonstrationFormat Level of detail for each demonstration.
+ * @param fewShotPromptType How demos are inserted. Null inherits from [PromptInsertionDefaults] in storage.
+ * @param demonstrationFormat Detail level for demos. Null inherits from [PromptInsertionDefaults] in storage.
  * @param defineTask Lambda that composes the task description from the resolved instruction and input.
  * @return A delegate for use with Kotlin property delegation (`by`).
  */
@@ -111,8 +111,8 @@ public inline fun <reified Input, reified Output> AIAgentSubgraphBuilderBase<*, 
     assistantResponseRepeatMax: Int? = null,
     responseProcessor: ResponseProcessor? = null,
     freshHistory: Boolean = false,
-    fewShotPromptType: FewShotPromptType = FewShotPromptType.AS_MESSAGE_HISTORY,
-    demonstrationFormat: DemonstrationFormat = DemonstrationFormat.COMPACT,
+    fewShotPromptType: FewShotPromptType? = null,
+    demonstrationFormat: DemonstrationFormat? = null,
     noinline defineTask: suspend AIAgentGraphContextBase.(instruction: String, input: Input) -> String,
 ): OptimizableSubgraphDelegate<Input, Output> {
     val finishTool = identityTool<Output>()
@@ -132,12 +132,12 @@ public inline fun <reified Input, reified Output> AIAgentSubgraphBuilderBase<*, 
             assistantResponseRepeatMax = assistantResponseRepeatMax,
             freshHistory = freshHistory,
 
-            // Resolve instruction from OptimizationConfig, pass to user's defineTask
+            // Resolve instruction from OptimizationArtifact, pass to user's defineTask
             defineTask = defineTask@{ input ->
                 val subgraphName = nameHolder.name
                     ?: error("Optimizable subgraph name was not resolved. This is a framework bug.")
-                val config = storage.get(OptimizationConfig.STORAGE_KEY)
-                val effectiveInstruction = config?.getInstruction(subgraphName)
+                val artifact = storage.get(OptimizationArtifact.STORAGE_KEY)
+                val effectiveInstruction = artifact?.getInstruction(subgraphName)
                     ?: optimizableInstruction
 
                 defineTask(effectiveInstruction, input)
@@ -146,25 +146,29 @@ public inline fun <reified Input, reified Output> AIAgentSubgraphBuilderBase<*, 
             // Inject demonstrations after task description, before LLM request
             beforeLLMRequest = beforeLLMRequest@{
                 val subgraphName = nameHolder.name ?: return@beforeLLMRequest
-                val config = storage.get(OptimizationConfig.STORAGE_KEY)
-                val demos = config?.getDemonstrations(subgraphName).orEmpty()
+                val artifact = storage.get(OptimizationArtifact.STORAGE_KEY)
+                val demos = artifact?.getDemonstrations(subgraphName).orEmpty()
                 if (demos.isEmpty()) return@beforeLLMRequest
 
+                val defaults = storage.get(PromptInsertionDefaults.STORAGE_KEY)
+                val effectivePromptType = fewShotPromptType
+                    ?: defaults?.fewShotPromptType
+                    ?: FewShotPromptType.AS_MESSAGE_HISTORY
+                val effectiveFormat = demonstrationFormat
+                    ?: defaults?.demonstrationFormat
+                    ?: DemonstrationFormat.COMPACT
+
                 llm.writeSession {
-                    when (fewShotPromptType) {
+                    when (effectivePromptType) {
                         FewShotPromptType.AS_STRING -> {
-                            val rendered = DemonstrationRenderer.renderAsString(
-                                demos, demonstrationFormat
-                            )
+                            val rendered = DemonstrationRenderer.renderAsString(demos, effectiveFormat)
                             if (rendered != null) {
                                 appendPrompt { user(rendered) }
                             }
                         }
 
                         FewShotPromptType.AS_MESSAGE_HISTORY -> {
-                            val demoMessages = DemonstrationRenderer.renderAsMessages(
-                                demos, demonstrationFormat
-                            )
+                            val demoMessages = DemonstrationRenderer.renderAsMessages(demos, effectiveFormat)
                             if (demoMessages.isNotEmpty()) {
                                 appendPrompt { messages(demoMessages) }
                             }
