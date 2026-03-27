@@ -565,9 +565,10 @@ class OptimizationIntegrationTest {
 
         val messages = prompts.first().messages
 
-        // The bootstrapped demo's input should appear
-        assertTrue(messages.any { it.content == "training-input" },
-            "Bootstrapped demo input should appear in prompt")
+        // With FULL_TRACE (default), the demo's intermediate messages are injected.
+        // The training input appears inside the defineTask system message, not as a standalone message.
+        assertTrue(messages.any { it.content.contains("training-input") },
+            "Bootstrapped demo content should appear in prompt")
     }
 
     @Test

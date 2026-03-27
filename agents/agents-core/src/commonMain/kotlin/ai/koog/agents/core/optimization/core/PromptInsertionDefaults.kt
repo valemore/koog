@@ -17,7 +17,7 @@ import kotlinx.serialization.Serializable
 @Serializable
 public data class PromptInsertionDefaults(
     val fewShotPromptType: FewShotPromptType = FewShotPromptType.AS_MESSAGE_HISTORY,
-    val demonstrationFormat: DemonstrationFormat = DemonstrationFormat.COMPACT,
+    val demonstrationFormat: DemonstrationFormat = DemonstrationFormat.FULL_TRACE,
 ) {
     /**
      * Companion object for [PromptInsertionDefaults].
