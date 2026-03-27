@@ -1,4 +1,4 @@
-package ai.koog.agents.core.optimization.core
+package ai.koog.agents.optimization.core
 
 /**
  * Controls the level of detail included when rendering a demonstration into the prompt.

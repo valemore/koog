@@ -1,14 +1,14 @@
-package ai.koog.agents.core.optimization.features
+package ai.koog.agents.optimization.features
 
 import ai.koog.agents.core.agent.GraphAIAgent.FeatureContext
 import ai.koog.agents.core.agent.entity.AIAgentStorageKey
 import ai.koog.agents.core.feature.AIAgentGraphFeature
 import ai.koog.agents.core.feature.config.FeatureConfig
 import ai.koog.agents.core.feature.pipeline.AIAgentGraphPipeline
-import ai.koog.agents.core.optimization.core.DemonstrationRenderer
-import ai.koog.agents.core.optimization.core.FewShotPromptType
-import ai.koog.agents.core.optimization.core.OptimizationArtifact
-import ai.koog.agents.core.optimization.core.PromptInsertionDefaults
+import ai.koog.agents.optimization.core.DemonstrationRenderer
+import ai.koog.agents.optimization.core.FewShotPromptType
+import ai.koog.agents.optimization.core.OptimizationArtifact
+import ai.koog.agents.optimization.core.PromptInsertionDefaults
 import ai.koog.prompt.dsl.Prompt
 import ai.koog.prompt.message.Message
 

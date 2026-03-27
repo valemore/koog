@@ -1,4 +1,4 @@
-package ai.koog.agents.core.optimization.core
+package ai.koog.agents.optimization.core
 
 /**
  * An evaluation function that scores how well an actual output matches an expected output.

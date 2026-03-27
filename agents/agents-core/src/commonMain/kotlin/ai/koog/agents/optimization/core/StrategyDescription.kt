@@ -1,4 +1,4 @@
-package ai.koog.agents.core.optimization.core
+package ai.koog.agents.optimization.core
 
 import ai.koog.agents.core.agent.entity.AIAgentGraphStrategy
 import ai.koog.agents.core.agent.entity.AIAgentNode

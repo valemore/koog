@@ -1,4 +1,4 @@
-package ai.koog.agents.core.optimization.core
+package ai.koog.agents.optimization.core
 
 import ai.koog.agents.core.agent.ToolCalls
 import ai.koog.agents.core.agent.context.AIAgentGraphContextBase
@@ -8,8 +8,8 @@ import ai.koog.agents.core.annotation.InternalAgentsApi
 import ai.koog.agents.core.dsl.builder.AIAgentBuilderDslMarker
 import ai.koog.agents.core.dsl.builder.AIAgentSubgraphBuilderBase
 import ai.koog.agents.core.dsl.builder.AIAgentSubgraphDelegate
-import ai.koog.agents.core.optimization.features.inheritedMessagesKey
-import ai.koog.agents.core.optimization.features.intermediateMessagesKey
+import ai.koog.agents.optimization.features.inheritedMessagesKey
+import ai.koog.agents.optimization.features.intermediateMessagesKey
 import ai.koog.agents.core.tools.annotations.InternalAgentToolsApi
 import ai.koog.agents.ext.agent.identityTool
 import ai.koog.agents.ext.agent.setupSubgraphWithTask
@@ -68,10 +68,10 @@ public class OptimizableSubgraphDelegate<Input, Output> @PublishedApi internal c
  * 2. **Demo injection**: demonstrations from [OptimizationArtifact] are injected into the prompt
  *    after the task description, before the LLM request.
  * 3. **Trace export**: intermediate messages are saved to storage before the prompt is discarded,
- *    enabling [SubgraphTraceCollectionFeature][ai.koog.agents.core.optimization.features.SubgraphTraceCollectionFeature]
+ *    enabling [SubgraphTraceCollectionFeature][ai.koog.agents.optimization.features.SubgraphTraceCollectionFeature]
  *    to capture full execution traces.
  *
- * If [OptimizationFeature][ai.koog.agents.core.optimization.features.OptimizationFeature]
+ * If [OptimizationFeature][ai.koog.agents.optimization.features.OptimizationFeature]
  * is not installed, the subgraph uses [optimizableInstruction] and empty demonstrations.
  *
  * **Important**: subgraph names must be globally unique within a strategy for optimization to

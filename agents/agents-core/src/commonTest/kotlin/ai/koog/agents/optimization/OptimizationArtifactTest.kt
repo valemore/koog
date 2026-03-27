@@ -1,7 +1,7 @@
-package ai.koog.agents.core.optimization
+package ai.koog.agents.optimization
 
-import ai.koog.agents.core.optimization.core.Demonstration
-import ai.koog.agents.core.optimization.core.OptimizationArtifact
+import ai.koog.agents.optimization.core.Demonstration
+import ai.koog.agents.optimization.core.OptimizationArtifact
 import kotlinx.serialization.json.Json
 import kotlin.js.JsName
 import kotlin.test.Test

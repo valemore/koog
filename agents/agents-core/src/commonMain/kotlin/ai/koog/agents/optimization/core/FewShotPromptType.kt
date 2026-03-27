@@ -1,4 +1,4 @@
-package ai.koog.agents.core.optimization.core
+package ai.koog.agents.optimization.core
 
 /**
  * Controls how few-shot demonstrations are inserted into the prompt.

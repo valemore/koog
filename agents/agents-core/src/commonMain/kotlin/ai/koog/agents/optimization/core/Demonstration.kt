@@ -1,4 +1,4 @@
-package ai.koog.agents.core.optimization.core
+package ai.koog.agents.optimization.core
 
 import ai.koog.prompt.message.Message
 import kotlinx.serialization.Serializable

@@ -1,4 +1,4 @@
-package ai.koog.agents.core.optimization.core
+package ai.koog.agents.optimization.core
 
 import ai.koog.agents.core.agent.entity.AIAgentStorageKey
 import ai.koog.agents.core.agent.entity.createStorageKey
@@ -7,7 +7,7 @@ import kotlinx.serialization.Serializable
 /**
  * Default settings for how demonstrations are inserted into prompts.
  *
- * These defaults are set at the feature level via [ai.koog.agents.core.optimization.features.OptimizationFeature]
+ * These defaults are set at the feature level via [ai.koog.agents.optimization.features.OptimizationFeature]
  * and propagated to all optimizable subgraphs via agent storage. Individual subgraphs can override
  * these defaults by specifying explicit values in `optimizableSubgraphWithTask`.
  *
