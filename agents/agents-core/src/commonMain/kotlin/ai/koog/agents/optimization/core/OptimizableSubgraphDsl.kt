@@ -11,9 +11,11 @@ import ai.koog.agents.core.dsl.builder.AIAgentSubgraphDelegate
 import ai.koog.agents.optimization.features.inheritedMessagesKey
 import ai.koog.agents.optimization.features.intermediateMessagesKey
 import ai.koog.agents.core.tools.annotations.InternalAgentToolsApi
+import ai.koog.agents.ext.agent.SubgraphWithTaskUtils
 import ai.koog.agents.ext.agent.identityTool
 import ai.koog.agents.ext.agent.setupSubgraphWithTask
 import ai.koog.prompt.llm.LLModel
+import ai.koog.prompt.message.Message
 import ai.koog.prompt.params.LLMParams
 import ai.koog.prompt.processor.ResponseProcessor
 import kotlin.reflect.KProperty
@@ -185,12 +187,20 @@ public inline fun <reified Input, reified Output> AIAgentSubgraphBuilderBase<*, 
             },
 
             // Export intermediate messages for trace collection, stripping inherited prefix
+            // and dropping the trailing Tool.Result for finalize_task_result (post-answer noise).
             afterFinishToolCall = afterFinishToolCall@{
                 val subgraphName = nameHolder.name ?: return@afterFinishToolCall
                 val allMessages = llm.readSession { prompt.messages }
                 val inherited = storage.get(inheritedMessagesKey(subgraphName)).orEmpty()
                 val subgraphOnly = DemonstrationRenderer.dropInheritedPrefix(allMessages, inherited)
-                storage.set(intermediateMessagesKey(subgraphName), subgraphOnly)
+                // The finalize_task_result Tool.Result is the framework echoing the answer back
+                // after the agent already produced its Tool.Call. It adds no teaching signal for
+                // few-shot demonstrations and should be excluded from the trace.
+                // TODO: Make it cleaner
+                val trimmed = subgraphOnly.dropLastWhile { msg ->
+                    msg is Message.Tool.Result && msg.tool == SubgraphWithTaskUtils.FINALIZE_SUBGRAPH_TOOL_NAME
+                }
+                storage.set(intermediateMessagesKey(subgraphName), trimmed)
             },
         )
     }
