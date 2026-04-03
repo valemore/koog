@@ -4,6 +4,7 @@ import ai.koog.agents.core.agent.ToolCalls
 import ai.koog.agents.core.agent.context.AIAgentGraphContextBase
 import ai.koog.agents.core.agent.entity.AIAgentSubgraph
 import ai.koog.agents.core.agent.entity.ToolSelectionStrategy
+import ai.koog.agents.core.agent.entity.createStorageKey
 import ai.koog.agents.core.annotation.InternalAgentsApi
 import ai.koog.agents.core.dsl.builder.AIAgentBuilderDslMarker
 import ai.koog.agents.core.dsl.builder.AIAgentSubgraphBuilderBase
@@ -19,6 +20,10 @@ import ai.koog.prompt.message.Message
 import ai.koog.prompt.params.LLMParams
 import ai.koog.prompt.processor.ResponseProcessor
 import kotlin.reflect.KProperty
+
+/** Wrapper to store nullable or platform-typed Input in a storage key that requires `Any`. */
+@PublishedApi
+internal class InputHolder<Input>(val value: Input)
 
 /**
  * Holds the resolved subgraph name for use inside node lambdas.
@@ -99,7 +104,12 @@ public class OptimizableSubgraphDelegate<Input, Output> @PublishedApi internal c
  * @param freshHistory When true, the subgraph starts with an empty conversation history.
  * @param fewShotPromptType How demos are inserted. Null inherits from [PromptInsertionDefaults] in storage.
  * @param demonstrationFormat Detail level for demos. Null inherits from [PromptInsertionDefaults] in storage.
- * @param defineTask Lambda that composes the task description from the resolved instruction and input.
+ * @param defineTask Lambda that composes the user query from the resolved instruction and input.
+ *   For fresh history, the resolved instruction is also placed as the system message separately,
+ *   so demonstrations are sandwiched between the instruction and the query:
+ *   `system(instruction) → demos → user(defineTask(instruction, input)) → LLM response`.
+ *   The instruction is available in the lambda for convenience — if used, it will appear in both
+ *   the system message and the user query (which is fine, it reinforces the instruction).
  * @return A delegate for use with Kotlin property delegation (`by`).
  */
 @OptIn(InternalAgentToolsApi::class, InternalAgentsApi::class)
@@ -135,7 +145,11 @@ public inline fun <reified Input, reified Output> AIAgentSubgraphBuilderBase<*, 
             assistantResponseRepeatMax = assistantResponseRepeatMax,
             freshHistory = freshHistory,
 
-            // Resolve instruction from OptimizationArtifact, pass to user's defineTask
+            // Resolve instruction from OptimizationArtifact.
+            // For fresh history: returns instruction only (becomes system message);
+            //   the user query is appended after demos by beforeLLMRequest.
+            // For non-fresh: returns defineTask(instruction, input) (becomes user message);
+            //   demos are injected before it by nodeBeforeLLM.
             defineTask = defineTask@{ input ->
                 val subgraphName = nameHolder.name
                     ?: error("Optimizable subgraph name was not resolved. This is a framework bug.")
@@ -149,39 +163,73 @@ public inline fun <reified Input, reified Output> AIAgentSubgraphBuilderBase<*, 
                 val effectiveInstruction = artifact?.getInstruction(subgraphName)
                     ?: optimizableInstruction
 
-                defineTask(effectiveInstruction, input)
+                // Store input so beforeLLMRequest can append the query after demos.
+                // Key includes subgraph name to avoid collisions between subgraphs.
+                // TODO: Seek a cleaner way to pass input to the next step, also, need to
+                //  re-think the prompt ordering options
+                val inputStorageKey = createStorageKey<InputHolder<Input>>("optimizable-subgraph-input-$subgraphName")
+                storage.set(inputStorageKey, InputHolder(input))
+
+                if (freshHistory) {
+                    // Instruction alone becomes the system message.
+                    // The user query (defineTask result) is appended after demos by beforeLLMRequest.
+                    effectiveInstruction
+                } else {
+                    // Non-fresh: combine into a single user message (current behavior).
+                    defineTask(effectiveInstruction, input)
+                }
             },
 
-            // Inject demonstrations after task description, before LLM request
+            // Inject demonstrations and (for fresh history) the user query.
+            //
+            // Prompt ordering:
+            //   Fresh:     system(instruction) → demos → user(defineTask(instruction, input)) → LLM
+            //   Non-fresh: [inherited] → demos → user(defineTask(instruction, input)) → LLM
             beforeLLMRequest = beforeLLMRequest@{
                 val subgraphName = nameHolder.name ?: return@beforeLLMRequest
                 val artifact = storage.get(OptimizationArtifact.STORAGE_KEY)
                 val demos = artifact?.getDemonstrations(subgraphName).orEmpty()
-                if (demos.isEmpty()) return@beforeLLMRequest
 
-                val defaults = storage.get(PromptInsertionDefaults.STORAGE_KEY)
-                val effectivePromptType = fewShotPromptType
-                    ?: defaults?.fewShotPromptType
-                    ?: FewShotPromptType.AS_MESSAGE_HISTORY
-                val effectiveFormat = demonstrationFormat
-                    ?: defaults?.demonstrationFormat
-                    ?: DemonstrationFormat.COMPACT
+                if (demos.isNotEmpty()) {
+                    val defaults = storage.get(PromptInsertionDefaults.STORAGE_KEY)
+                    val effectivePromptType = fewShotPromptType
+                        ?: defaults?.fewShotPromptType
+                        ?: FewShotPromptType.AS_MESSAGE_HISTORY
+                    val effectiveFormat = demonstrationFormat
+                        ?: defaults?.demonstrationFormat
+                        ?: DemonstrationFormat.COMPACT
 
-                llm.writeSession {
-                    when (effectivePromptType) {
-                        FewShotPromptType.AS_STRING -> {
-                            val rendered = DemonstrationRenderer.renderAsString(demos, effectiveFormat)
-                            if (rendered != null) {
-                                appendPrompt { user(rendered) }
+                    llm.writeSession {
+                        when (effectivePromptType) {
+                            FewShotPromptType.AS_STRING -> {
+                                val rendered = DemonstrationRenderer.renderAsString(demos, effectiveFormat)
+                                if (rendered != null) {
+                                    appendPrompt { user(rendered) }
+                                }
+                            }
+
+                            FewShotPromptType.AS_MESSAGE_HISTORY -> {
+                                val demoMessages =
+                                    DemonstrationRenderer.renderAsMessages(demos, effectiveFormat)
+                                if (demoMessages.isNotEmpty()) {
+                                    appendPrompt { messages(demoMessages) }
+                                }
                             }
                         }
+                    }
+                }
 
-                        FewShotPromptType.AS_MESSAGE_HISTORY -> {
-                            val demoMessages = DemonstrationRenderer.renderAsMessages(demos, effectiveFormat)
-                            if (demoMessages.isNotEmpty()) {
-                                appendPrompt { messages(demoMessages) }
-                            }
-                        }
+                // For fresh history: append the user query after demos so it's the last
+                // message before the LLM response, not buried in the system message.
+                if (freshHistory) {
+                    val inputKey = createStorageKey<InputHolder<Input>>("optimizable-subgraph-input-$subgraphName")
+                    val input = storage.getValue(inputKey).value
+                    val freshArtifact = storage.get(OptimizationArtifact.STORAGE_KEY)
+                    val effectiveInstruction = freshArtifact?.getInstruction(subgraphName)
+                        ?: optimizableInstruction
+                    val queryText = defineTask(effectiveInstruction, input)
+                    llm.writeSession {
+                        appendPrompt { user(queryText) }
                     }
                 }
             },
