@@ -286,6 +286,74 @@ class OptimizableSubgraphTest {
     }
 
     @Test
+    @JsName("testNonFreshHistoryDemoOrderingDemosBeforeQuery")
+    fun testNonFreshHistoryDemoOrderingDemosBeforeQuery() = runTest {
+        val prompts = mutableListOf<Prompt>()
+        val demos = listOf(Demonstration("demo-input", "demo-output"))
+
+        createAgent(
+            freshHistory = false,
+            config = OptimizationArtifact(subgraphDemonstrations = mapOf("classify" to demos)),
+            fewShotPromptType = FewShotPromptType.AS_MESSAGE_HISTORY,
+            capturedPrompts = prompts,
+        ).use { it.run("real query") }
+
+        val messages = prompts.first().messages
+
+        // Find indices: demo user message and the actual query user message
+        val demoIndex = messages.indexOfFirst { it is Message.User && it.content == "demo-input" }
+        val queryIndex = messages.indexOfFirst {
+            it is Message.User && it.content.contains("real query")
+        }
+
+        assertTrue(demoIndex >= 0, "Demo user message should be present")
+        assertTrue(queryIndex >= 0, "Query user message should be present")
+        assertTrue(
+            demoIndex < queryIndex,
+            "Demos should appear before the query in non-fresh history mode " +
+                    "(demo at $demoIndex, query at $queryIndex)"
+        )
+    }
+
+    @Test
+    @JsName("testFreshHistoryDemoOrderingInstructionThenDemosThenQuery")
+    fun testFreshHistoryDemoOrderingInstructionThenDemosThenQuery() = runTest {
+        // With freshHistory=true, the prompt should be:
+        //   system(instruction) → demos → user(defineTask(instruction, input)) → LLM
+        val prompts = mutableListOf<Prompt>()
+        val demos = listOf(Demonstration("demo-input", "demo-output"))
+
+        createAgent(
+            freshHistory = true,
+            config = OptimizationArtifact(subgraphDemonstrations = mapOf("classify" to demos)),
+            fewShotPromptType = FewShotPromptType.AS_MESSAGE_HISTORY,
+            capturedPrompts = prompts,
+        ).use { it.run("real query") }
+
+        val messages = prompts.first().messages
+
+        // System message should contain the instruction but the query appears
+        // as a separate user message after demos
+        val systemMsg = messages.first()
+        assertTrue(systemMsg is Message.System, "First message should be system")
+        assertTrue(
+            systemMsg.content.contains("Default instruction"),
+            "System message should contain the instruction"
+        )
+
+        // Demo should come after the system message
+        val demoIndex = messages.indexOfFirst { it is Message.User && it.content == "demo-input" }
+        assertTrue(demoIndex > 0, "Demo should appear after the system message")
+
+        // Query user message should come after demos
+        val queryIndex = messages.indexOfFirst {
+            it is Message.User && it.content.contains("real query")
+        }
+        assertTrue(queryIndex > demoIndex,
+            "Query should appear after demos (demo at $demoIndex, query at $queryIndex)")
+    }
+
+    @Test
     @JsName("testSubgraphNameDerivedFromPropertyName")
     fun testSubgraphNameDerivedFromPropertyName() = runTest {
         val prompts = mutableListOf<Prompt>()
@@ -805,9 +873,10 @@ class OptimizableSubgraphTest {
     }
 
     @Test
-    @JsName("testIntermediateContainsToolCallsAndResults")
-    fun testIntermediateContainsToolCallsAndResults() = runTest {
-        // Verify intermediate messages include tool call/result messages
+    @JsName("testIntermediateConvertsFinishToolCallToAssistant")
+    fun testIntermediateConvertsFinishToolCallToAssistant() = runTest {
+        // Verify that finalize_task_result Tool.Call is converted to Assistant
+        // and Tool.Result is dropped entirely.
         val strategy = strategy<String, String>("test-strategy") {
             val classify by optimizableSubgraphWithTask<String, String>(
                 optimizableInstruction = "Classify.",
@@ -821,10 +890,19 @@ class OptimizableSubgraphTest {
         val demo = traces.getTraces("classify").first()
         assertNotNull(demo.intermediateMessages)
 
-        // Should contain a tool call (the finish tool)
+        // finalize_task_result should be converted to Assistant, not kept as Tool.Call
         assertTrue(
-            demo.intermediateMessages.any { it is Message.Tool.Call },
-            "Intermediate should contain tool call messages. Got roles: ${demo.intermediateMessages.map { it.role }}"
+            demo.intermediateMessages.none { it is Message.Tool.Call },
+            "finalize_task_result Tool.Call should be converted to Assistant. Got: ${demo.intermediateMessages.map { "${it::class.simpleName}(${it.content.take(30)})" }}"
+        )
+        assertTrue(
+            demo.intermediateMessages.none { it is Message.Tool.Result },
+            "finalize_task_result Tool.Result should be removed"
+        )
+        // The converted Assistant message should contain the tool output
+        assertTrue(
+            demo.intermediateMessages.any { it is Message.Assistant && it.content.contains("done") },
+            "Should contain an Assistant message with the finish tool output"
         )
     }
 

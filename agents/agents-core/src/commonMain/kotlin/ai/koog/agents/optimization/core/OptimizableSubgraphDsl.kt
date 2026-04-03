@@ -99,7 +99,7 @@ public class OptimizableSubgraphDelegate<Input, Output> @PublishedApi internal c
  * @param llmModel Optional LLM model override.
  * @param llmParams Optional LLM parameters override.
  * @param runMode Tool execution mode (sequential, parallel, single-run).
- * @param assistantResponseRepeatMax Max retries when model doesn't call tools.
+ * @param assistantResponseRepeatMax Max retries when the model doesn't call tools.
  * @param responseProcessor Optional post-processing of LLM responses.
  * @param freshHistory When true, the subgraph starts with an empty conversation history.
  * @param fewShotPromptType How demos are inserted. Null inherits from [PromptInsertionDefaults] in storage.
@@ -154,7 +154,7 @@ public inline fun <reified Input, reified Output> AIAgentSubgraphBuilderBase<*, 
                 val subgraphName = nameHolder.name
                     ?: error("Optimizable subgraph name was not resolved. This is a framework bug.")
 
-                // Capture inherited prompt before the subgraph adds anything.
+                // Capture the inherited prompt before the subgraph adds anything.
                 // Used later to strip the inherited prefix from intermediate messages.
                 val inherited = llm.readSession { prompt.messages }
                 storage.set(inheritedMessagesKey(subgraphName), inherited)
@@ -240,6 +240,7 @@ public inline fun <reified Input, reified Output> AIAgentSubgraphBuilderBase<*, 
             //   2. Drop the leading system message (the instruction — already provided separately)
             //   3. Convert finalize_task_result Tool.Call → plain Assistant message
             //   4. Drop the finalize_task_result Tool.Result (post-answer framework echo)
+            // TODO: Message filtering could be cleaner
             afterFinishToolCall = afterFinishToolCall@{
                 val subgraphName = nameHolder.name ?: return@afterFinishToolCall
                 val allMessages = llm.readSession { prompt.messages }
@@ -247,9 +248,14 @@ public inline fun <reified Input, reified Output> AIAgentSubgraphBuilderBase<*, 
                 val subgraphOnly = DemonstrationRenderer.dropInheritedPrefix(allMessages, inherited)
 
                 val cleaned = subgraphOnly
-                    // Drop leading system message (instruction is already in the system prompt)
+                    // Drop the leading system message (instruction is already in the system prompt)
                     .dropWhile { it is Message.System }
-                    // Convert finalize_task_result Tool.Call to Assistant and drop its Tool.Result
+                    // TODO: For freshHistory = false, the system message is still present in all few-shots.
+                    //  We might wanna split those in two as well. Depends on the semantic we want to capture.
+                    // Convert finalize_task_result `Tool.Call` to an `Assistant` and drop its Tool.Result
+                    // This is needed because we don't want duplicate content like Tool.Call and Tool.Result
+                    // to flood the few-shot demonstrations, at the same time, abandoned tool calls w/o results are
+                    // not allowed, therefore we remove the Tool.Result and map the Tool.Call to an Assistant.
                     .map { msg ->
                         if (msg is Message.Tool.Call && msg.tool == SubgraphWithTaskUtils.FINALIZE_SUBGRAPH_TOOL_NAME) {
                             Message.Assistant(msg.content, msg.metaInfo)

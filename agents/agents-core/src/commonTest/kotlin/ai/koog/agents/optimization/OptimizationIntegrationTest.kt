@@ -527,10 +527,15 @@ class OptimizationIntegrationTest {
             "Should capture intermediate messages from optimizable subgraph")
         assertTrue(demo.intermediateMessages.isNotEmpty())
 
-        // Intermediate should contain the system message from defineTask
-        assertTrue(demo.intermediateMessages.any {
-            it is Message.System && it.content.contains("Classify the input.")
-        }, "Intermediate should contain the subgraph's system message")
+        // System message (instruction) should be stripped — it's provided separately.
+        assertTrue(demo.intermediateMessages.none { it is Message.System },
+            "System message should be stripped from intermediate messages")
+
+        // finalize_task_result Tool.Call should be converted to Assistant.
+        assertTrue(demo.intermediateMessages.none { it is Message.Tool.Call },
+            "Tool.Call should be converted to Assistant")
+        assertTrue(demo.intermediateMessages.none { it is Message.Tool.Result },
+            "Tool.Result should be removed")
     }
 
     @Test
