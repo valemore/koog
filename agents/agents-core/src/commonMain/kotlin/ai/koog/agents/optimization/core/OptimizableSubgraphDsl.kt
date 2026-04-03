@@ -234,21 +234,34 @@ public inline fun <reified Input, reified Output> AIAgentSubgraphBuilderBase<*, 
                 }
             },
 
-            // Export intermediate messages for trace collection, stripping inherited prefix
-            // and dropping the trailing Tool.Result for finalize_task_result (post-answer noise).
+            // Export intermediate messages for trace collection.
+            // Cleans up the captured trace to produce a natural few-shot demonstration:
+            //   1. Strip inherited prefix (parent conversation before this subgraph)
+            //   2. Drop the leading system message (the instruction — already provided separately)
+            //   3. Convert finalize_task_result Tool.Call → plain Assistant message
+            //   4. Drop the finalize_task_result Tool.Result (post-answer framework echo)
             afterFinishToolCall = afterFinishToolCall@{
                 val subgraphName = nameHolder.name ?: return@afterFinishToolCall
                 val allMessages = llm.readSession { prompt.messages }
                 val inherited = storage.get(inheritedMessagesKey(subgraphName)).orEmpty()
                 val subgraphOnly = DemonstrationRenderer.dropInheritedPrefix(allMessages, inherited)
-                // The finalize_task_result Tool.Result is the framework echoing the answer back
-                // after the agent already produced its Tool.Call. It adds no teaching signal for
-                // few-shot demonstrations and should be excluded from the trace.
-                // TODO: Make it cleaner
-                val trimmed = subgraphOnly.dropLastWhile { msg ->
-                    msg is Message.Tool.Result && msg.tool == SubgraphWithTaskUtils.FINALIZE_SUBGRAPH_TOOL_NAME
-                }
-                storage.set(intermediateMessagesKey(subgraphName), trimmed)
+
+                val cleaned = subgraphOnly
+                    // Drop leading system message (instruction is already in the system prompt)
+                    .dropWhile { it is Message.System }
+                    // Convert finalize_task_result Tool.Call to Assistant and drop its Tool.Result
+                    .map { msg ->
+                        if (msg is Message.Tool.Call && msg.tool == SubgraphWithTaskUtils.FINALIZE_SUBGRAPH_TOOL_NAME) {
+                            Message.Assistant(msg.content, msg.metaInfo)
+                        } else {
+                            msg
+                        }
+                    }
+                    .filter { msg ->
+                        !(msg is Message.Tool.Result && msg.tool == SubgraphWithTaskUtils.FINALIZE_SUBGRAPH_TOOL_NAME)
+                    }
+
+                storage.set(intermediateMessagesKey(subgraphName), cleaned)
             },
         )
     }
