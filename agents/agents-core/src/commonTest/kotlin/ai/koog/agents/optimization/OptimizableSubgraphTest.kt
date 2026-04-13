@@ -12,7 +12,7 @@ import ai.koog.agents.optimization.core.optimizableSubgraphWithTask
 import ai.koog.agents.optimization.features.CollectedSubgraphTraces
 import ai.koog.agents.optimization.features.SubgraphTraceCollectionFeature
 import ai.koog.agents.optimization.features.collectSubgraphTraces
-import ai.koog.agents.optimization.features.installOptimization
+import ai.koog.agents.optimization.features.installPromptOptimization
 import ai.koog.agents.core.tools.ToolRegistry
 import ai.koog.agents.ext.agent.SubgraphWithTaskUtils
 import ai.koog.agents.features.eventHandler.feature.EventHandler
@@ -78,7 +78,7 @@ class OptimizableSubgraphTest {
             toolRegistry = ToolRegistry { },
             installFeatures = {
                 if (config != null) {
-                    installOptimization { artifact = config }
+                    installPromptOptimization { artifact = config }
                 }
                 if (capturedPrompts != null) {
                     install(EventHandler) {
@@ -393,7 +393,7 @@ class OptimizableSubgraphTest {
             agentConfig = AIAgentConfig(prompt = prompt("t") { }, model = model, maxAgentIterations = 20),
             toolRegistry = ToolRegistry { },
             installFeatures = {
-                installOptimization {
+                installPromptOptimization {
                     artifact = OptimizationArtifact(
                         subgraphInstructions = mapOf("custom-name" to "Custom instruction"),
                     )
@@ -433,7 +433,7 @@ class OptimizableSubgraphTest {
             agentConfig = AIAgentConfig(prompt = prompt("t") { }, model = model, maxAgentIterations = 40),
             toolRegistry = ToolRegistry { },
             installFeatures = {
-                installOptimization {
+                installPromptOptimization {
                     artifact = OptimizationArtifact(
                         subgraphInstructions = mapOf(
                             "first" to "Optimized first",
@@ -477,7 +477,7 @@ class OptimizableSubgraphTest {
             agentConfig = AIAgentConfig(prompt = prompt("t") { }, model = model, maxAgentIterations = 40),
             toolRegistry = ToolRegistry { },
             installFeatures = {
-                installOptimization {
+                installPromptOptimization {
                     artifact = OptimizationArtifact(
                         subgraphDemonstrations = mapOf(
                             "first" to listOf(Demonstration("first-demo-in", "first-demo-out")),
@@ -522,7 +522,7 @@ class OptimizableSubgraphTest {
             agentConfig = AIAgentConfig(prompt = prompt("t") { }, model = model, maxAgentIterations = 40),
             toolRegistry = ToolRegistry { },
             installFeatures = {
-                installOptimization {
+                installPromptOptimization {
                     artifact = OptimizationArtifact(
                         subgraphInstructions = mapOf("task" to "Shared instruction"),
                     )
@@ -713,7 +713,7 @@ class OptimizableSubgraphTest {
             ),
             toolRegistry = ToolRegistry { },
             installFeatures = {
-                installOptimization {
+                installPromptOptimization {
                     artifact = OptimizationArtifact(
                         subgraphInstructions = mapOf("inner" to "Optimized inner"),
                         subgraphDemonstrations = mapOf(

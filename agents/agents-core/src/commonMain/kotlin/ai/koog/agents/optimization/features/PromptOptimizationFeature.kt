@@ -13,13 +13,13 @@ import ai.koog.prompt.dsl.Prompt
 import ai.koog.prompt.message.Message
 
 /**
- * Configuration for the [OptimizationFeature].
+ * Configuration for the [PromptOptimizationFeature].
  *
  * @property artifact The optimization artifact to apply at runtime.
  * @property promptInsertionDefaults Default settings for how demos are inserted into prompts.
  *   Individual subgraphs can override these.
  */
-public class OptimizationFeatureConfig : FeatureConfig() {
+public class PromptPromptOptimizationFeatureConfig : FeatureConfig() {
     /** The optimization artifact with tuned instructions and bootstrapped demonstrations. */
     public var artifact: OptimizationArtifact = OptimizationArtifact()
 
@@ -44,21 +44,21 @@ public class OptimizationFeatureConfig : FeatureConfig() {
  * Usage:
  * ```kotlin
  * val agent = AIAgent(...) {
- *     installOptimization {
+ *     installPromptOptimization {
  *         artifact = loadedArtifact
  *     }
  * }
  * ```
  */
-public object OptimizationFeature :
-    AIAgentGraphFeature<OptimizationFeatureConfig, OptimizationArtifact> {
+public object PromptOptimizationFeature :
+    AIAgentGraphFeature<PromptPromptOptimizationFeatureConfig, OptimizationArtifact> {
 
     override val key: AIAgentStorageKey<OptimizationArtifact> = OptimizationArtifact.STORAGE_KEY
 
-    override fun createInitialConfig(): OptimizationFeatureConfig = OptimizationFeatureConfig()
+    override fun createInitialConfig(): PromptPromptOptimizationFeatureConfig = PromptPromptOptimizationFeatureConfig()
 
     override fun install(
-        config: OptimizationFeatureConfig,
+        config: PromptPromptOptimizationFeatureConfig,
         pipeline: AIAgentGraphPipeline,
     ): OptimizationArtifact {
         val artifact = config.artifact
@@ -128,7 +128,7 @@ public object OptimizationFeature :
 }
 
 /**
- * Installs the [OptimizationFeature] with the given configuration.
+ * Installs the [PromptOptimizationFeature] with the given configuration.
  *
  * Makes the [OptimizationArtifact] available to all optimizable subgraphs via agent storage.
  * If the artifact includes strategy-level instruction or demonstrations, those are applied
@@ -136,8 +136,8 @@ public object OptimizationFeature :
  *
  * @param configure Lambda to set the artifact and prompt insertion defaults.
  */
-public fun FeatureContext.installOptimization(configure: OptimizationFeatureConfig.() -> Unit = {}) {
-    install(OptimizationFeature) {
+public fun FeatureContext.installPromptOptimization(configure: PromptPromptOptimizationFeatureConfig.() -> Unit = {}) {
+    install(PromptOptimizationFeature) {
         configure()
     }
 }

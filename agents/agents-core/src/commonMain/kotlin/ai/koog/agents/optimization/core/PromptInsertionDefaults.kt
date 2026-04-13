@@ -7,7 +7,7 @@ import kotlinx.serialization.Serializable
 /**
  * Default settings for how demonstrations are inserted into prompts.
  *
- * These defaults are set at the feature level via [ai.koog.agents.optimization.features.OptimizationFeature]
+ * These defaults are set at the feature level via [ai.koog.agents.optimization.features.PromptOptimizationFeature]
  * and propagated to all optimizable subgraphs via agent storage. Individual subgraphs can override
  * these defaults by specifying explicit values in `optimizableSubgraphWithTask`.
  *

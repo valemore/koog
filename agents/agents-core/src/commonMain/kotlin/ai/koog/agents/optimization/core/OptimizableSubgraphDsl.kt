@@ -78,7 +78,7 @@ public class OptimizableSubgraphDelegate<Input, Output> @PublishedApi internal c
  *    enabling [SubgraphTraceCollectionFeature][ai.koog.agents.optimization.features.SubgraphTraceCollectionFeature]
  *    to capture full execution traces.
  *
- * If [OptimizationFeature][ai.koog.agents.optimization.features.OptimizationFeature]
+ * If [PromptOptimizationFeature][ai.koog.agents.optimization.features.PromptOptimizationFeature]
  * is not installed, the subgraph uses [optimizableInstruction] and empty demonstrations.
  *
  * **Important**: subgraph names must be globally unique within a strategy for optimization to

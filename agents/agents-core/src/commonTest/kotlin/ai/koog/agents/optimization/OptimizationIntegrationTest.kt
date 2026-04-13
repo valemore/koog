@@ -14,7 +14,7 @@ import ai.koog.agents.optimization.core.optimizableSubgraphWithTask
 import ai.koog.agents.optimization.features.CollectedSubgraphTraces
 import ai.koog.agents.optimization.features.SubgraphTraceCollectionFeature
 import ai.koog.agents.optimization.features.collectSubgraphTraces
-import ai.koog.agents.optimization.features.installOptimization
+import ai.koog.agents.optimization.features.installPromptOptimization
 import ai.koog.agents.core.tools.ToolRegistry
 import ai.koog.agents.ext.agent.SubgraphWithTaskUtils
 import ai.koog.agents.ext.agent.subgraphWithTask
@@ -101,7 +101,7 @@ class OptimizationIntegrationTest {
             ),
             toolRegistry = ToolRegistry { },
             installFeatures = {
-                installOptimization {
+                installPromptOptimization {
                     this.artifact = artifact
                     this.promptInsertionDefaults = defaults
                 }
@@ -130,7 +130,7 @@ class OptimizationIntegrationTest {
             ),
             toolRegistry = ToolRegistry { },
             installFeatures = {
-                installOptimization { this.artifact = artifact }
+                installPromptOptimization { this.artifact = artifact }
                 collectSubgraphTraces { }
             },
         )
