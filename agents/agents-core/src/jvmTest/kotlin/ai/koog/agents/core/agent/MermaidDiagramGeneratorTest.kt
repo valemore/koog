@@ -315,6 +315,7 @@ class MermaidDiagramGeneratorTest {
                     state "provideResult" as provideResult
                     state "verifyTask" as verifyTask {
                         state "setupTask" as setupTask
+                        state "nodeBeforeLLM" as nodeBeforeLLM
                         state "nodeCallLLM" as nodeCallLLM
                         state "nodeDecide" as nodeDecide
                         state "callToolsHacked" as callToolsHacked
@@ -323,7 +324,8 @@ class MermaidDiagramGeneratorTest {
                         state "sendToolsResults" as sendToolsResults
 
                         [*] --> setupTask
-                        setupTask --> nodeCallLLM
+                        setupTask --> nodeBeforeLLM
+                        nodeBeforeLLM --> nodeCallLLM
                         nodeCallLLM --> nodeDecide
                         nodeDecide --> callToolsHacked : transformed
                         nodeDecide --> handleAssistantMessage : transformed

@@ -213,6 +213,7 @@ public inline fun <reified Input, reified Output> subgraphWithTask(
     runMode: ToolCalls = ToolCalls.SEQUENTIAL,
     assistantResponseRepeatMax: Int? = null,
     responseProcessor: ResponseProcessor? = null,
+    freshHistory: Boolean = false,
     noinline defineTask: suspend AIAgentGraphContextBase.(input: Input) -> String
 ): AIAgentSubgraphDelegate<Input, Output> = subgraph(
     name = name,
@@ -220,13 +221,17 @@ public inline fun <reified Input, reified Output> subgraphWithTask(
     llmModel = llmModel,
     llmParams = llmParams,
     responseProcessor = responseProcessor,
+    freshHistory = freshHistory,
 ) {
     val finishTool = FinishTool<Output>(typeToken<Output>())
 
-    setupSubgraphWithTask<Input, Output, Output>(
+    setupSubgraphWithTask(
         finishTool = finishTool,
+        inputType = typeToken<Input>(),
+        outputTransformedType = typeToken<Output>(),
         runMode = runMode,
         assistantResponseRepeatMax = assistantResponseRepeatMax,
+        freshHistory = freshHistory,
         defineTask = defineTask
     )
 }
@@ -262,6 +267,7 @@ public fun <Input : Any, Output : Any> subgraphWithTask(
     runMode: ToolCalls = ToolCalls.SEQUENTIAL,
     assistantResponseRepeatMax: Int? = null,
     responseProcessor: ResponseProcessor? = null,
+    freshHistory: Boolean = false,
     defineTask: suspend AIAgentGraphContextBase.(input: Input) -> String
 ): AIAgentSubgraphDelegate<Input, Output> = subgraph(
     name = name,
@@ -271,6 +277,7 @@ public fun <Input : Any, Output : Any> subgraphWithTask(
     llmModel = llmModel,
     llmParams = llmParams,
     responseProcessor = responseProcessor,
+    freshHistory = freshHistory,
 ) {
     val finishTool = FinishTool<Output>(outputType)
 
@@ -280,6 +287,7 @@ public fun <Input : Any, Output : Any> subgraphWithTask(
         outputTransformedType = outputType,
         runMode = runMode,
         assistantResponseRepeatMax = assistantResponseRepeatMax,
+        freshHistory = freshHistory,
         defineTask = defineTask
     )
 }
@@ -307,6 +315,7 @@ public inline fun <reified Input, reified Output> subgraphWithTask(
     runMode: ToolCalls = ToolCalls.SEQUENTIAL,
     assistantResponseRepeatMax: Int? = null,
     responseProcessor: ResponseProcessor? = null,
+    freshHistory: Boolean = false,
     noinline defineTask: suspend AIAgentGraphContextBase.(input: Input) -> String
 ): AIAgentSubgraphDelegate<Input, Output> = subgraphWithTask(
     toolSelectionStrategy = ToolSelectionStrategy.Tools(tools.map { it.descriptor }),
@@ -316,6 +325,7 @@ public inline fun <reified Input, reified Output> subgraphWithTask(
     runMode = runMode,
     assistantResponseRepeatMax = assistantResponseRepeatMax,
     responseProcessor = responseProcessor,
+    freshHistory = freshHistory,
     defineTask = defineTask
 )
 
@@ -349,6 +359,7 @@ public fun <Input : Any, OutputTransformed : Any> subgraphWithTask(
     runMode: ToolCalls = ToolCalls.SEQUENTIAL,
     assistantResponseRepeatMax: Int? = null,
     responseProcessor: ResponseProcessor? = null,
+    freshHistory: Boolean = false,
     defineTask: suspend AIAgentGraphContextBase.(input: Input) -> String
 ): AIAgentSubgraphDelegate<Input, OutputTransformed> = subgraph<Input, OutputTransformed>(
     inputType = inputType,
@@ -358,6 +369,7 @@ public fun <Input : Any, OutputTransformed : Any> subgraphWithTask(
     llmModel = llmModel,
     llmParams = llmParams,
     responseProcessor = responseProcessor,
+    freshHistory = freshHistory,
 ) {
     setupSubgraphWithTask(
         finishTool = finishTool,
@@ -365,6 +377,7 @@ public fun <Input : Any, OutputTransformed : Any> subgraphWithTask(
         outputTransformedType = finishTool.resultType,
         runMode = runMode,
         assistantResponseRepeatMax = assistantResponseRepeatMax,
+        freshHistory = freshHistory,
         defineTask = defineTask,
     )
 }
@@ -397,6 +410,7 @@ public inline fun <reified Input, reified Output, reified OutputTransformed> sub
     runMode: ToolCalls = ToolCalls.SEQUENTIAL,
     assistantResponseRepeatMax: Int? = null,
     responseProcessor: ResponseProcessor? = null,
+    freshHistory: Boolean = false,
     noinline defineTask: suspend AIAgentGraphContextBase.(input: Input) -> String
 ): AIAgentSubgraphDelegate<Input, OutputTransformed> = subgraph(
     name = name,
@@ -404,11 +418,13 @@ public inline fun <reified Input, reified Output, reified OutputTransformed> sub
     llmModel = llmModel,
     llmParams = llmParams,
     responseProcessor = responseProcessor,
+    freshHistory = freshHistory,
 ) {
     setupSubgraphWithTask<Input, Output, OutputTransformed>(
         finishTool = finishTool,
         runMode = runMode,
         assistantResponseRepeatMax = assistantResponseRepeatMax,
+        freshHistory = freshHistory,
         defineTask = defineTask
     )
 }
@@ -441,6 +457,7 @@ public inline fun <reified Input, reified Output, reified OutputTransformed> sub
     runMode: ToolCalls = ToolCalls.SEQUENTIAL,
     assistantResponseRepeatMax: Int? = null,
     responseProcessor: ResponseProcessor? = null,
+    freshHistory: Boolean = false,
     noinline defineTask: suspend AIAgentGraphContextBase.(input: Input) -> String
 ): AIAgentSubgraphDelegate<Input, OutputTransformed> = subgraph(
     name = name,
@@ -448,11 +465,13 @@ public inline fun <reified Input, reified Output, reified OutputTransformed> sub
     llmModel = llmModel,
     llmParams = llmParams,
     responseProcessor = responseProcessor,
+    freshHistory = freshHistory,
 ) {
     setupSubgraphWithTask<Input, Output, OutputTransformed>(
         finishTool = finishTool,
         runMode = runMode,
         assistantResponseRepeatMax = assistantResponseRepeatMax,
+        freshHistory = freshHistory,
         defineTask = defineTask
     )
 }
@@ -656,6 +675,9 @@ public fun <Input, Output, OutputTransformed> AIAgentSubgraphBuilderBase<Input, 
     outputTransformedType: TypeToken,
     runMode: ToolCalls,
     assistantResponseRepeatMax: Int? = null,
+    freshHistory: Boolean = false,
+    beforeLLMRequest: (suspend AIAgentGraphContextBase.() -> Unit)? = null,
+    afterFinishToolCall: (suspend AIAgentGraphContextBase.() -> Unit)? = null,
     defineTask: suspend AIAgentGraphContextBase.(Input) -> String
 ) {
     val originalToolsKey = createStorageKey<List<ToolDescriptor>>("all-available-tools")
@@ -686,6 +708,8 @@ public fun <Input, Output, OutputTransformed> AIAgentSubgraphBuilderBase<Input, 
         inputType = typeToken<ReceivedToolResult>(),
         outputType = outputTransformedType
     ) { toolResult ->
+        afterFinishToolCall?.invoke(this)
+
         llm.writeSession {
             // Restore original tools
             tools = storage.get(originalToolsKey)!!
@@ -697,7 +721,38 @@ public fun <Input, Output, OutputTransformed> AIAgentSubgraphBuilderBase<Input, 
     // Helper node to overcome problems of the current api and repeat less code when writing routing conditions
     val nodeDecide by node<List<Message.Response>, List<Message.Response>> { it }
 
-    val nodeCallLLMDelegate = if (runMode == ToolCalls.SINGLE_RUN_SEQUENTIAL) {
+    // Passthrough node for the optional beforeLLMRequest hook.
+    // For non-freshHistory paths, this runs between task setup and the standard LLM request
+    // node, allowing injection of content (e.g. few-shot demonstrations) into the prompt.
+    // For freshHistory, the hook is called inline within nodeCallLLM instead, because it
+    // must run after the system message is appended but before requestLLM.
+    val nodeBeforeLLM by node<String, String> { message ->
+        if (!freshHistory) {
+            beforeLLMRequest?.invoke(this)
+        }
+        message
+    }
+
+    val nodeCallLLMDelegate = if (freshHistory) {
+        // When freshHistory is true, the defineTask result becomes a system message
+        // rather than a user message to serve as the subgraph's own instruction.
+        node<String, List<Message.Response>> { message ->
+            llm.writeSession {
+                appendPrompt {
+                    system(message)
+                }
+            }
+            // Hook runs here: after the system message, before LLM request.
+            beforeLLMRequest?.invoke(this)
+            llm.writeSession {
+                if (runMode == ToolCalls.SINGLE_RUN_SEQUENTIAL) {
+                    listOf(requestLLM())
+                } else {
+                    requestLLMMultiple()
+                }
+            }
+        }
+    } else if (runMode == ToolCalls.SINGLE_RUN_SEQUENTIAL) {
         nodeLLMRequest().transform { listOf(it) }
     } else {
         nodeLLMRequestMultiple()
@@ -767,7 +822,7 @@ public fun <Input, Output, OutputTransformed> AIAgentSubgraphBuilderBase<Input, 
         }
     }
 
-    nodeStart then setupTask then nodeCallLLM then nodeDecide
+    nodeStart then setupTask then nodeBeforeLLM then nodeCallLLM then nodeDecide
 
     edge(
         nodeDecide forwardTo callToolsHacked
@@ -833,6 +888,7 @@ public inline fun <reified Input, Output, reified OutputTransformed> AIAgentSubg
     finishTool: Tool<Output, OutputTransformed>,
     runMode: ToolCalls,
     assistantResponseRepeatMax: Int? = null,
+    freshHistory: Boolean = false,
     noinline defineTask: suspend AIAgentGraphContextBase.(Input) -> String
 ) {
     setupSubgraphWithTask(
@@ -841,6 +897,7 @@ public inline fun <reified Input, Output, reified OutputTransformed> AIAgentSubg
         outputTransformedType = typeToken<OutputTransformed>(),
         runMode = runMode,
         assistantResponseRepeatMax = assistantResponseRepeatMax,
+        freshHistory = freshHistory,
         defineTask = defineTask,
     )
 }
