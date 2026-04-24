@@ -15,6 +15,10 @@ package ai.koog.agents.core.agent.entity
  * @param name The human-readable name of the storage key, used only for its string representation.
  */
 public class AIAgentStorageKey<T : Any>(public val name: String) {
+    override fun equals(other: Any?): Boolean =
+        this === other || (other is AIAgentStorageKey<*> && name == other.name)
+
+    override fun hashCode(): Int = name.hashCode()
     override fun toString(): String = "${super.toString()}(name=$name)"
 }
 
