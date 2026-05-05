@@ -80,7 +80,7 @@ internal class AIAgentRunSessionImpl<Input, Output, TContext : AIAgentContext>(
                     val result = context.with(partName = strategy.name) { executionInfo, eventId ->
                         runCatchingCancellable {
                             state = AIAgentState.Running(context.parentContext ?: context)
-                            context.pipeline.onStrategyStarting(eventId, executionInfo, strategy, context)
+                            context.pipeline.onStrategyStarting(eventId, executionInfo, strategy, context, input)
                             val result = strategy.execute(context = context, input = input)
 
                             logger.trace { "Finished executing strategy (name: ${strategy.name}) with result: $result" }

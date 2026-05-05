@@ -247,11 +247,12 @@ public class AIAgentPipelineImpl(
         eventId: String,
         executionInfo: AgentExecutionInfo,
         strategy: AIAgentStrategy<*, *, *>,
-        context: AIAgentContext
+        context: AIAgentContext,
+        input: Any?,
     ) {
         invokeRegisteredHandlersForEvent(
             eventType = AgentLifecycleEventType.StrategyStarting,
-            context = StrategyStartingContext(eventId, executionInfo, strategy, context)
+            context = StrategyStartingContext(eventId, executionInfo, strategy, context, input)
         )
     }
 

@@ -121,7 +121,8 @@ public interface AIAgentPipelineAPI {
         eventId: String,
         executionInfo: AgentExecutionInfo,
         strategy: AIAgentStrategy<*, *, *>,
-        context: AIAgentContext
+        context: AIAgentContext,
+        input: Any?,
     )
 
     @InternalAgentsApi
