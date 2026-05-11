@@ -225,10 +225,8 @@ public inline fun <reified Input, reified Output> subgraphWithTask(
 ) {
     val finishTool = FinishTool<Output>(typeToken<Output>())
 
-    setupSubgraphWithTask(
+    setupSubgraphWithTask<Input, Output, Output>(
         finishTool = finishTool,
-        inputType = typeToken<Input>(),
-        outputTransformedType = typeToken<Output>(),
         runMode = runMode,
         assistantResponseRepeatMax = assistantResponseRepeatMax,
         freshHistory = freshHistory,
@@ -665,6 +663,9 @@ public inline fun <reified Input, reified Output, reified OutputTransformed> AIA
  * @param runMode the mode in which tools are executed, e.g., parallel or sequential execution.
  * @param assistantResponseRepeatMax the maximum number of assistant responses allowed before
  *        determining that the task cannot be completed. If not provided, a default is used.
+ * @param freshHistory when `true`, the string returned by [defineTask] is appended as a
+ *        `system` message; when `false`, it is appended as a `user` message via the standard
+ *        LLM request node.
  * @param defineTask a suspend function defining the task description, executed within the
  *        context of an AI agent graph and based on the given input data.
  */
@@ -676,8 +677,6 @@ public fun <Input, Output, OutputTransformed> AIAgentSubgraphBuilderBase<Input, 
     runMode: ToolCalls,
     assistantResponseRepeatMax: Int? = null,
     freshHistory: Boolean = false,
-    beforeLLMRequest: (suspend AIAgentGraphContextBase.() -> Unit)? = null,
-    afterFinishToolCall: (suspend AIAgentGraphContextBase.() -> Unit)? = null,
     defineTask: suspend AIAgentGraphContextBase.(Input) -> String
 ) {
     val originalToolsKey = createStorageKey<List<ToolDescriptor>>("all-available-tools")
@@ -708,8 +707,6 @@ public fun <Input, Output, OutputTransformed> AIAgentSubgraphBuilderBase<Input, 
         inputType = typeToken<ReceivedToolResult>(),
         outputType = outputTransformedType
     ) { toolResult ->
-        afterFinishToolCall?.invoke(this)
-
         llm.writeSession {
             // Restore original tools
             tools = storage.get(originalToolsKey)!!
@@ -721,18 +718,6 @@ public fun <Input, Output, OutputTransformed> AIAgentSubgraphBuilderBase<Input, 
     // Helper node to overcome problems of the current api and repeat less code when writing routing conditions
     val nodeDecide by node<List<Message.Response>, List<Message.Response>> { it }
 
-    // Passthrough node for the optional beforeLLMRequest hook.
-    // For non-freshHistory paths, this runs between task setup and the standard LLM request
-    // node, allowing injection of content (e.g. few-shot demonstrations) into the prompt.
-    // For freshHistory, the hook is called inline within nodeCallLLM instead, because it
-    // must run after the system message is appended but before requestLLM.
-    val nodeBeforeLLM by node<String, String> { message ->
-        if (!freshHistory) {
-            beforeLLMRequest?.invoke(this)
-        }
-        message
-    }
-
     val nodeCallLLMDelegate = if (freshHistory) {
         // When freshHistory is true, the defineTask result becomes a system message
         // rather than a user message to serve as the subgraph's own instruction.
@@ -741,10 +726,6 @@ public fun <Input, Output, OutputTransformed> AIAgentSubgraphBuilderBase<Input, 
                 appendPrompt {
                     system(message)
                 }
-            }
-            // Hook runs here: after the system message, before LLM request.
-            beforeLLMRequest?.invoke(this)
-            llm.writeSession {
                 if (runMode == ToolCalls.SINGLE_RUN_SEQUENTIAL) {
                     listOf(requestLLM())
                 } else {
@@ -822,7 +803,7 @@ public fun <Input, Output, OutputTransformed> AIAgentSubgraphBuilderBase<Input, 
         }
     }
 
-    nodeStart then setupTask then nodeBeforeLLM then nodeCallLLM then nodeDecide
+    nodeStart then setupTask then nodeCallLLM then nodeDecide
 
     edge(
         nodeDecide forwardTo callToolsHacked
@@ -880,6 +861,9 @@ public fun <Input, Output, OutputTransformed> AIAgentSubgraphBuilderBase<Input, 
  * @param runMode the mode in which tools are executed, e.g., parallel or sequential execution.
  * @param assistantResponseRepeatMax the maximum number of assistant responses allowed before
  *        determining that the task cannot be completed. If not provided, a default is used.
+ * @param freshHistory when `true`, the string returned by [defineTask] is appended as a
+ *        `system` message; when `false`, it is appended as a `user` message via the standard
+ *        LLM request node.
  * @param defineTask a suspend function defining the task description, executed within the
  *        context of an AI agent graph and based on the given input data.
  */
